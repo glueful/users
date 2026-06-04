@@ -16,6 +16,7 @@ use Glueful\Database\Connection;
 use Glueful\Notifications\Contracts\Notifiable;
 use Glueful\Notifications\Services\NotificationService;
 use Glueful\Security\OTP;
+use Glueful\Auth\Contracts\TwoFactorServiceInterface;
 
 /**
  * Front door for the core email-PIN 2FA feature.
@@ -25,7 +26,7 @@ use Glueful\Security\OTP;
  * successful login-purpose verify) TokenManager::createUserSession for real
  * session issuance plus a session-scoped freshness marker for /2fa/disable.
  */
-final class TwoFactorService
+final class TwoFactorService implements TwoFactorServiceInterface
 {
     /**
      * Fields cached in 2fa:pin:{jti}.user. Anything not on this list is dropped

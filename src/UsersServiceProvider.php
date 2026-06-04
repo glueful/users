@@ -7,6 +7,7 @@ namespace Glueful\Extensions\Users;
 use Glueful\Extensions\ServiceProvider;
 use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Auth\Contracts\UserProviderInterface;
+use Glueful\Auth\Contracts\TwoFactorServiceInterface;
 use Glueful\Database\Migrations\MigrationPriority;
 
 final class UsersServiceProvider extends ServiceProvider
@@ -35,9 +36,12 @@ final class UsersServiceProvider extends ServiceProvider
             ],
             // 2FA owns users.two_factor_enabled state. Built via a static factory (prod-safe) that
             // resolves the core token-mechanic deps (ChallengeTokenIssuer/JtiBlocklist) + config.
+            // Aliased to the core contract so AuthController resolves us via the interface — core
+            // never names this concrete class.
             TwoFactor\TwoFactorService::class => [
                 'factory' => [TwoFactor\TwoFactorServiceFactory::class, 'create'],
                 'shared' => true,
+                'alias' => [TwoFactorServiceInterface::class],
             ],
         ];
     }
