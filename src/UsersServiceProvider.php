@@ -8,7 +8,6 @@ use Glueful\Extensions\ServiceProvider;
 use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Auth\Contracts\UserProviderInterface;
 use Glueful\Database\Migrations\MigrationPriority;
-use Glueful\Extensions\Users\Repositories\UserRepository;
 
 final class UsersServiceProvider extends ServiceProvider
 {
@@ -16,16 +15,21 @@ final class UsersServiceProvider extends ServiceProvider
     public static function services(): array
     {
         return [
-            UserRepository::class => [
-                'class' => UserRepository::class,
+            Repositories\UserRepository::class => [
+                'class' => Repositories\UserRepository::class,
                 'shared' => true,
                 'autowire' => true,
             ],
-            // UserProvider needs UserRepository injected; the interface core consumes is an
-            // alias of the single UserProvider service (collectAliases()) — one shared instance.
+            // UserProvider needs UserRepository injected — the bare ['class' => ...] form would
+            // call `new UserProvider()` with no args and fatal. Pass it explicitly (matches the
+            // Aegis RoleService pattern: 'arguments' => ['@' . Dep::class]). PasswordHasher
+            // defaults to null inside UserProvider, so it need not be listed.
+            // The 'alias' key lives on the SERVICE definition (collectAliases() adds the listed
+            // ids as aliases OF this service id) — NOT on a separate interface entry. So the
+            // interface is declared here, and there is one shared UserProvider instance.
             UserProvider::class => [
                 'class' => UserProvider::class,
-                'arguments' => ['@' . UserRepository::class],
+                'arguments' => ['@' . Repositories\UserRepository::class],
                 'shared' => true,
                 'alias' => [UserProviderInterface::class],
             ],
