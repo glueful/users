@@ -44,8 +44,8 @@ final class UsersServiceProvider extends ServiceProvider
 
     public function register(ApplicationContext $context): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/routes.php');
-        $this->loadRoutesFrom(__DIR__ . '/routes_2fa.php');
+        $this->loadRoutesFrom(__DIR__ . '/../routes/account.php');
+        $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
         // Identity/auth schema must migrate before app + dependent extensions.
         $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
     }
