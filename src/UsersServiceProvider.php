@@ -33,12 +33,19 @@ final class UsersServiceProvider extends ServiceProvider
                 'shared' => true,
                 'alias' => [UserProviderInterface::class],
             ],
+            // 2FA owns users.two_factor_enabled state. Built via a static factory (prod-safe) that
+            // resolves the core token-mechanic deps (ChallengeTokenIssuer/JtiBlocklist) + config.
+            TwoFactor\TwoFactorService::class => [
+                'factory' => [TwoFactor\TwoFactorServiceFactory::class, 'create'],
+                'shared' => true,
+            ],
         ];
     }
 
     public function register(ApplicationContext $context): void
     {
         $this->loadRoutesFrom(__DIR__ . '/routes.php');
+        $this->loadRoutesFrom(__DIR__ . '/routes_2fa.php');
         // Identity/auth schema must migrate before app + dependent extensions.
         $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
     }
