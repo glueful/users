@@ -1,0 +1,1 @@
+Default user identity, credentials, profiles, account lifecycle, and 2FA state extension for Glueful. Provides the swappable user store behind Glueful’s core auth contracts.
