@@ -1,0 +1,36 @@
+parameters:
+	ignoreErrors:
+		-
+			message: "#^Method Glueful\\\\Extensions\\\\Users\\\\Controllers\\\\AccountController\\:\\:forgotPassword\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Controllers/AccountController.php
+
+		-
+			message: "#^Method Glueful\\\\Extensions\\\\Users\\\\Controllers\\\\AccountController\\:\\:resendOtp\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Controllers/AccountController.php
+
+		-
+			message: "#^Method Glueful\\\\Extensions\\\\Users\\\\Controllers\\\\AccountController\\:\\:resetPassword\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Controllers/AccountController.php
+
+		-
+			message: "#^Method Glueful\\\\Extensions\\\\Users\\\\Controllers\\\\AccountController\\:\\:verifyEmail\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Controllers/AccountController.php
+
+		-
+			message: "#^Method Glueful\\\\Extensions\\\\Users\\\\Controllers\\\\AccountController\\:\\:verifyOtp\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Controllers/AccountController.php
+
+		-
+			message: "#^Property Glueful\\\\Extensions\\\\Users\\\\Repositories\\\\UserRepository\\:\\:\\$validator is never read, only written\\.$#"
+			count: 1
+			path: src/Repositories/UserRepository.php
+
+		-
+			message: "#^Property Glueful\\\\Extensions\\\\Users\\\\Services\\\\EmailVerification\\:\\:\\$requestContext is never read, only written\\.$#"
+			count: 1
+			path: src/Services/EmailVerification.php

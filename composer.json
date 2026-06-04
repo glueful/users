@@ -3,8 +3,18 @@
     "description": "Users: first-party identity store + account lifecycle for Glueful",
     "type": "glueful-extension",
     "license": "MIT",
+    "authors": [
+        {
+            "name": "Glueful Team"
+        }
+    ],
     "require": {
         "php": "^8.3"
+    },
+    "require-dev": {
+        "glueful/framework": "@dev",
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.10"
     },
     "autoload": {
         "psr-4": {
@@ -25,5 +35,20 @@
                 "extensions": []
             }
         }
-    }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../framework",
+            "options": {
+                "symlink": true
+            }
+        }
+    ]
 }

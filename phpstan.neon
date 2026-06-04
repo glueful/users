@@ -1,0 +1,17 @@
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+    bootstrapFiles:
+        - vendor/autoload.php
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
+    # Inherited debt from code moved out of framework core (controllers without native return
+    # types, write-only legacy properties, etc.) — grandfathered via the baseline, matching how
+    # the framework treats the same code. New issues still fail the gate.
+    ignoreErrors:
+        - '#Function config invoked with [0-9]+ parameter, 0-2 required\.#'
+        - '#Function env invoked with [0-9]+ parameter, 1-2 required\.#'
