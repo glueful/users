@@ -1,0 +1,29 @@
+{
+    "name": "glueful/users",
+    "description": "Users: first-party identity store + account lifecycle for Glueful",
+    "type": "glueful-extension",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "Glueful\\Extensions\\Users\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Glueful\\Extensions\\Users\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "glueful": {
+            "name": "Users",
+            "provider": "Glueful\\Extensions\\Users\\UsersServiceProvider",
+            "requires": {
+                "glueful": ">=1.30.0",
+                "extensions": []
+            }
+        }
+    }
+}
