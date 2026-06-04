@@ -62,16 +62,18 @@ final class MigrationsTest extends TestCase
 
     public function test_migrations_apply_and_create_identity_schema(): void
     {
-        // Apply the extension's migrations (as the main path) on the fresh db. Priority/source
-        // ordering is covered separately by the framework's MigrationOrderingTest.
+        // Apply ONLY the extension's own migrations (passed as the main path). glueful/users owns
+        // the user store — users + profiles (+ 2FA user state). The security-spine tables
+        // (auth_sessions, auth_refresh_tokens, api_keys) are owned by framework core, not here.
+        // Constructing MigrationManager directly keeps core's foundation migrations out of scope.
         $mm = new MigrationManager(dirname(__DIR__) . '/migrations', null, $this->context);
         $mm->migrate();
 
         $schema = Connection::fromContext($this->context)->getSchemaBuilder();
-        foreach (['users', 'profiles', 'auth_sessions', 'auth_refresh_tokens', 'api_keys'] as $table) {
+        foreach (['users', 'profiles'] as $table) {
             self::assertTrue($schema->hasTable($table), "$table should exist");
         }
         self::assertTrue($schema->hasColumn('users', 'two_factor_enabled'));
-        self::assertTrue($schema->hasColumn('api_keys', 'user_uuid'));
+        self::assertTrue($schema->hasColumn('profiles', 'user_uuid'));
     }
 }
