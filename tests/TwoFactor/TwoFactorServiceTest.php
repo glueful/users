@@ -51,7 +51,8 @@ final class TwoFactorServiceTest extends TestCase
                 email TEXT,
                 status TEXT DEFAULT "active",
                 password TEXT,
-                two_factor_enabled INTEGER NOT NULL DEFAULT 0
+                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+                deleted_at TIMESTAMP NULL
             )'
         );
 

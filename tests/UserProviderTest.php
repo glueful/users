@@ -105,7 +105,8 @@ final class UserProviderTest extends TestCase
                 email VARCHAR(255),
                 password VARCHAR(255),
                 status VARCHAR(32) DEFAULT "active",
-                created_at TIMESTAMP NULL
+                created_at TIMESTAMP NULL,
+                deleted_at TIMESTAMP NULL
             )
         ');
     }

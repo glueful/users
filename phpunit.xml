@@ -9,6 +9,13 @@
             <directory>tests</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <!-- Force the array cache so framework boot never resolves Redis (no ext-redis required);
+             the booted-app test harness writes array cache config too, but boot can touch cache
+             resolution before that app config applies. force=true also overrides a dev's exported
+             CACHE_DRIVER=redis. -->
+        <env name="CACHE_DRIVER" value="array" force="true"/>
+    </php>
     <source>
         <include>
             <directory>src</directory>
