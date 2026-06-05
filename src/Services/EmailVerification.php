@@ -42,9 +42,6 @@ class EmailVerification
     /** @var NotificationService Notification service instance */
     private NotificationService $notificationService;
 
-    /** @var object|null Email notification provider (loaded from extension) */
-    private ?object $emailProvider = null;
-
     /** @var RequestContext Request context service */
     private RequestContext $requestContext;
 
@@ -125,39 +122,11 @@ class EmailVerification
             );
         }
 
-        // Initialize EmailNotificationProvider if extension is available and context exists
-        $emailExtensionClass = '\Glueful\Extensions\EmailNotification\EmailNotificationProvider';
-        if (class_exists($emailExtensionClass) && $this->context !== null) {
-            /** @var class-string $providerClass */
-            $providerClass = $emailExtensionClass;
-            $this->emailProvider = new $providerClass($this->context);
-            if (method_exists($this->emailProvider, 'initialize')) {
-                $this->emailProvider->initialize();
-            }
-            // If using DI, provider/channel likely registered during extension boot.
-            // Only register manually in fallback mode.
-            $usingDi = false;
-            try {
-                $c = container($this->context);
-                $usingDi = $c->has(\Glueful\Notifications\Services\NotificationDispatcher::class);
-            } catch (\Throwable $e) {
-                $usingDi = false;
-            }
-            if ($usingDi === false) {
-                if (method_exists($this->emailProvider, 'register')) {
-                    $this->emailProvider->register($channelManager);
-                }
-            }
-            // Ensure provider hooks (before/after send) are active
-            if (method_exists($dispatcher, 'getExtension') && method_exists($dispatcher, 'registerExtension')) {
-                $name = method_exists($this->emailProvider, 'getExtensionName')
-                    ? $this->emailProvider->getExtensionName()
-                    : 'email_notification';
-                if ($dispatcher->getExtension($name) === null) {
-                    $dispatcher->registerExtension($this->emailProvider);
-                }
-            }
-        }
+        // Email delivery relies solely on the notification channel contract: whichever
+        // extension registers an 'email' channel with the ChannelManager (at boot, via DI)
+        // satisfies it. If none is registered, the send methods return a clear "email
+        // provider not configured" result (see NotificationResultParser) and log it — Users
+        // does not reach into any concrete email-provider class.
 
         // Initialize NotificationService with required dispatcher and repository
         $notificationRepository = new \Glueful\Repository\NotificationRepository();
@@ -625,22 +594,6 @@ class EmailVerification
 
 
             return $errorResult;
-        }
-    }
-
-    /**
-     * Check if email provider is properly configured
-     *
-     * @return bool True if email provider is properly configured
-     */
-    public function isEmailProviderConfigured(): bool
-    {
-        try {
-            // Delegate to EmailNotificationProvider's implementation
-            return $this->emailProvider->isEmailProviderConfigured();
-        } catch (\Exception $e) {
-            error_log("Error checking email provider configuration: " . $e->getMessage());
-            return false;
         }
     }
 
