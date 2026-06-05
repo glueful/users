@@ -9,6 +9,10 @@ use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Auth\Contracts\UserProviderInterface;
 use Glueful\Auth\Contracts\TwoFactorServiceInterface;
 use Glueful\Database\Migrations\MigrationPriority;
+use Glueful\Permissions\Catalog\Permission;
+use Glueful\Extensions\Users\Support\PayloadProjector;
+use Glueful\Extensions\Users\Support\ProfileFieldResolver;
+use Glueful\Extensions\Users\Support\ProfileResponder;
 
 final class UsersServiceProvider extends ServiceProvider
 {
@@ -43,15 +47,44 @@ final class UsersServiceProvider extends ServiceProvider
                 'shared' => true,
                 'alias' => [TwoFactorServiceInterface::class],
             ],
+            ProfileFieldResolver::class => ['class' => ProfileFieldResolver::class, 'shared' => true, 'autowire' => true],
+            PayloadProjector::class => ['class' => PayloadProjector::class, 'shared' => true, 'autowire' => true],
+            ProfileResponder::class => ['class' => ProfileResponder::class, 'shared' => true, 'autowire' => true],
         ];
     }
 
     public function register(ApplicationContext $context): void
     {
+        // Register shipped config defaults (requires framework ^1.50.1, where mergeConfig() was
+        // fixed). An app's config/users.php overrides per key.
+        $this->mergeConfig('users', require __DIR__ . '/../config/users.php');
+
         $this->loadRoutesFrom(__DIR__ . '/../routes/account.php');
         $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
+        $this->loadRoutesFrom(__DIR__ . '/../routes/users.php');
+
+        if ((bool) config($context, 'users.user_lookup.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/user-lookup.php');
+
+            if ((bool) config($context, 'users.user_lookup.list.enabled', false)) {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/user-list.php');
+            }
+        }
+
         // Identity/auth schema must migrate before app + dependent extensions.
         $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
+    }
+
+    /** @return list<\Glueful\Permissions\Catalog\Permission> */
+    public function permissions(): array
+    {
+        return [
+            Permission::define('users.read')
+                ->label('Read users')
+                ->description("Read another user's account and public profile via GET /users/{uuid}")
+                ->category('users')
+                ->managedBy('glueful/users'),
+        ];
     }
 
     public function boot(ApplicationContext $context): void

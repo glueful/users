@@ -155,6 +155,86 @@ class UserRepository extends BaseRepository
     }
 
     /**
+     * Read a single non-deleted user row selecting ONLY the given columns (never SELECT *).
+     *
+     * @param list<string> $columns
+     * @return array<string,mixed>|null
+     */
+    public function findAccountRow(string $uuid, array $columns): ?array
+    {
+        if ($columns === []) {
+            return null;
+        }
+        $rows = $this->db->table('users')
+            ->select($columns)
+            ->where(['uuid' => $uuid])
+            ->whereNull('deleted_at')
+            ->limit(1)
+            ->get();
+
+        return $rows !== [] ? $rows[0] : null;
+    }
+
+    /**
+     * Read a single non-deleted profile row selecting ONLY the given columns.
+     *
+     * @param list<string> $columns
+     * @return array<string,mixed>|null
+     */
+    public function findProfileRow(string $uuid, array $columns): ?array
+    {
+        if ($columns === []) {
+            return null;
+        }
+        $rows = $this->db->table('profiles')
+            ->select($columns)
+            ->where(['user_uuid' => $uuid])
+            ->whereNull('deleted_at')
+            ->limit(1)
+            ->get();
+
+        return $rows !== [] ? $rows[0] : null;
+    }
+
+    /**
+     * Paginated `users LEFT JOIN profiles` reader for GET /users. Selects explicit, aliased columns
+     * (account as-is; profile as `profile__<col>`) plus two control columns — `_p_present`
+     * (profiles.user_uuid; null ⇒ no profile) and `_p_deleted_at` — used by the responder to PHP-null
+     * absent/soft-deleted profiles. The QueryFilter (already soft-delete-guarded) is applied before
+     * pagination. Soft-deleted USERS are excluded via `users.deleted_at IS NULL`.
+     *
+     * @param list<string> $accountCols effective `users` columns (never empty; resolver forces uuid)
+     * @param list<string> $profileCols effective `profiles` columns (may be empty)
+     * @return array{data: array<int,array<string,mixed>>, current_page:int, per_page:int, total:int, last_page:int, has_more:bool, from:int, to:int}
+     */
+    public function paginateUsersWithProfiles(
+        array $accountCols,
+        array $profileCols,
+        \Glueful\Api\Filtering\QueryFilter $filter,
+        int $page,
+        int $perPage
+    ): array {
+        $select = [];
+        foreach ($accountCols as $c) {
+            $select[] = "users.$c AS $c";
+        }
+        foreach ($profileCols as $c) {
+            $select[] = "profiles.$c AS profile__$c";
+        }
+        $select[] = 'profiles.user_uuid AS _p_present';
+        $select[] = 'profiles.deleted_at AS _p_deleted_at';
+
+        $qb = $this->db->table('users')
+            ->selectRaw(implode(', ', $select))
+            ->leftJoin('profiles', 'profiles.user_uuid', '=', 'users.uuid')
+            ->whereNull('users.deleted_at');
+
+        $filter->apply($qb);
+
+        return $qb->paginate($page, $perPage);
+    }
+
+    /**
      * Get profiles for multiple users in a single query (bulk operation)
      *
      * @param array<string> $userUuids Array of user UUIDs

@@ -269,6 +269,43 @@ TWO_FACTOR_ENABLED=false
 - `POST /2fa/verify` – Verify a PIN against a `challenge_token`. For a **login** challenge it completes login and returns the full session (identical to `POST /auth/login`); for an **enrollment** challenge it returns `{success, message}`
 - `POST /2fa/disable` – Disable 2FA (auth required; needs a recent 2FA verification within `disable_freshness`)
 
+### Account read endpoints
+
+- `GET /me` — the authenticated principal's account + nested `profile` (auth required, always on).
+- `GET /users/{uuid}` — another user's account + public profile. **Off by default** (`USERS_USER_LOOKUP_ENABLED=true`), requires the `users.read` permission.
+- `GET /users` — paginated list of users + nested public profile. **Off by default** (requires both `USERS_USER_LOOKUP_ENABLED=true` and `USERS_USER_LIST_ENABLED=true`), requires the `users.read` permission.
+
+```bash
+GET /users?page=1&per_page=25                    # clamped: per_page max 100
+GET /users?sort=-created_at                        # default; or username/first_name/last_name
+GET /users?filter[profile][first_name]=Jane        # filter by profile field
+GET /users?search=jane                             # username + profile names (email only if enabled)
+GET /users?fields=username,profile.first_name      # per-item field selection
+```
+
+Email is filterable/searchable only when `USERS_USER_LIST_ALLOW_EMAIL_FILTER=true`. `status` is not filterable by default. Soft-deleted profiles never affect membership or ordering.
+
+**Field selection (REST dot-paths):**
+
+```bash
+GET /me                                   # full default shape
+GET /me?fields=id,email                   # only those
+GET /me?fields=email,profile.first_name   # nested subset
+```
+
+Disallowed/unknown fields are pruned (omitted). Requesting only disallowed fields returns an empty object — not the full payload.
+
+**Exposable columns are config-driven** (`config/users.php`) — separately for `me` and `users` audiences. Add a custom `profiles` column (via migration), then opt it in:
+
+```php
+'profile_fields' => [
+    'me'    => ['first_name', 'last_name', 'photo_url', 'phone'], // exposed to self
+    'users' => ['first_name', 'last_name', 'photo_url'],          // not to others
+],
+```
+
+`password` and `deleted_at` are never exposable (hard denylist); `photo_uuid` is absent by default but can be opted in. To override defaults, copy the package's `config/users.php` into your app's `config/` and edit it.
+
 ## CLI Commands
 
 Auto-discovered from the extension's `Console/` directory (require an enabled extension):
