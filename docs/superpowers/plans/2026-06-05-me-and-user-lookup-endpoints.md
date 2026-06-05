@@ -1409,3 +1409,850 @@ Expected: all PASS; PHPStan clean. Fix any types on the new files.
 - **Type consistency:** `ProfileFieldResolver::resolve()` → `['account','profile','allow']`; `PayloadProjector::project(merged, allow, ?fields)`; `ProfileResponder::build()` → `?array`; readers `findAccountRow`/`findProfileRow`; controller maps `null → notFound()`.
 - **APIs confirmed against v1.50.1:** `Router::match(Request): ?array`; `AlterTableBuilder::addColumn(string,string,array)`; `QueryBuilder::whereNull(string): static` and `insert(array): int` (on `src/Database/QueryBuilder.php`, not `src/Database/Query/`); `Permission::define()->label()->description()->category()->managedBy()`; `ApplicationContext::mergeConfigDefaults()` + `config($ctx,$key,$default)` (config defaults via `mergeConfig`, app `config/users.php` overrides).
 - **`ProviderWiringTest` route-loading tests run in separate processes** — `loadRoutesFrom()`'s function-`static $loaded` realpath cache persists per process and isn't reset by `RouteManifest::reset()`, so repeated `register()` calls would otherwise be order-dependent.
+
+> **As-built correction (Phase 1):** `@runInSeparateProcess` turned out to be unusable — `Framework::boot()` crashes PHPUnit's child process. The shipped `ProviderWiringTest` instead asserts route presence by `require`-ing the route file directly into a fresh `Router` (bypassing the static cache) and tests gating via absence/sole-loader. Phase 2 uses the same approach (see Phase 2 · Task 5). Also: `Connection::getPDO()`'s soft-delete column cache (`SoftDeleteHandler::tableHasDeletedAtColumn()`, a process-global function-static keyed by table name) means any test whose inline mock omits `deleted_at` breaks once a real-migration test caches that table — keep mock schemas column-complete.
+
+---
+
+# Phase 2: `GET /users` collection (paginated list)
+
+> **Spec:** `docs/superpowers/specs/2026-06-05-me-and-user-lookup-endpoints-design.md` → "Phase 2" section. Builds on Phase 1; reuses `AppTestCase`, `ProfileFieldResolver`, `PayloadProjector`, the `users` audience config, and the `users.read` permission.
+
+**Goal:** Add `GET /users` — a paginated list of users + nested basic profile, behind a second gate (`user_lookup.list.enabled`), with full `QueryFilter` (filter/sort/search) over `users` **and** `profiles` columns, where soft-deleted profiles can never affect membership or ordering.
+
+**Architecture:** A single `LEFT JOIN users ⨝ profiles` paginated query (no N+1). A `UsersListQueryFilter` (subclass of the framework `QueryFilter`) maps public field names → qualified columns and **guards every profile predicate** with `profiles.deleted_at IS NULL` (custom `filter*()` methods, an overridden `applySearch()` using `whereRaw` per-branch guards, and an overridden `applySort()` using `orderByRaw(CASE …)`). `ProfileResponder::buildList()` reconstructs each flat row into account + nested profile (PHP-nulling absent/soft-deleted profiles) and projects per item; the controller clamps `page`/`per_page` and returns `{items, pagination}`.
+
+**Tech stack:** PHP 8.3, Glueful `^1.50.1`, PHPUnit 10, SQLite harness. APIs confirmed against v1.50.1: `QueryBuilder::selectRaw()` (replaces default `*`), `leftJoin(table,first,op,second)` (column-to-column only), `whereRaw(cond,bindings)`, `orderByRaw(expr)`, `paginate(page,perPage): {data,current_page,per_page,total,last_page,has_more,from,to}` (throws if `perPage<=0`/`offset<0`); `QueryFilter` (`__construct(Request)`, protected `$filterable/$sortable/$searchable/$defaultSort`, `protected applySearch(string)`, `protected applySort(ParsedSort)`, dispatches `filter{Studly(field)}($filter->value, $filter->operator)` where `$filter->value` may be an array); `OperatorRegistry::get(string): FilterOperatorInterface` → `apply(QueryBuilder,$field,$value)`; `ParsedSort::{DIRECTION_ASC,DIRECTION_DESC}`; `studly('profile.first_name') === 'ProfileFirstName'`; the parser turns `?filter[profile][first_name]=` into field `profile.first_name` and intersects `?search_fields=` against `$searchable` (so it must hold **public** names).
+
+> **Commit cadence:** per-task commit steps are shown for completeness; batch them at logical groupings per this repo's preference.
+
+---
+
+## Phase 2 · Task 1: `user_lookup.list` config defaults
+
+**Files:**
+- Modify: `config/users.php`
+- Modify: `tests/Feature/ConfigModelTest.php`
+
+- [ ] **Step 1: Add the failing test** (append methods to `ConfigModelTest`)
+
+```php
+    public function test_list_defaults_present_and_disabled(): void
+    {
+        $this->bootApp();
+        $this->context->mergeConfigDefaults('users', $this->shipped());
+
+        self::assertFalse((bool) config($this->context, 'users.user_lookup.list.enabled', null), 'list ships disabled');
+        self::assertFalse((bool) config($this->context, 'users.user_lookup.list.allow_email_filter', null), 'email filter ships off');
+        self::assertSame(25, config($this->context, 'users.user_lookup.list.per_page.default', null));
+        self::assertSame(100, config($this->context, 'users.user_lookup.list.per_page.max', null));
+        self::assertSame('-created_at', config($this->context, 'users.user_lookup.list.default_sort', null));
+    }
+```
+
+- [ ] **Step 2: Run it (fails — keys missing)**
+
+Run: `composer test -- --filter=test_list_defaults_present_and_disabled`
+Expected: FAIL (asserts null/empty).
+
+- [ ] **Step 3: Add the `list` block to `config/users.php`**
+
+Replace the `'user_lookup'` entry with:
+
+```php
+    'user_lookup' => [
+        'enabled' => env('USERS_USER_LOOKUP_ENABLED', false),
+        // GET /users collection — a larger surface than a known-UUID lookup, so it has its own gate.
+        'list' => [
+            'enabled'            => env('USERS_USER_LIST_ENABLED', false),
+            'allow_email_filter' => env('USERS_USER_LIST_ALLOW_EMAIL_FILTER', false),
+            'per_page'           => ['default' => 25, 'max' => 100],
+            'default_sort'       => '-created_at', // QueryFilter '-' prefix = DESC
+        ],
+    ],
+```
+
+- [ ] **Step 4: Run to pass**
+
+Run: `composer test -- --filter=ConfigModelTest`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add config/users.php tests/Feature/ConfigModelTest.php
+git commit -m "feat(users): user_lookup.list config defaults (Phase 2)"
+```
+
+---
+
+## Phase 2 · Task 2: `UsersListQueryFilter`
+
+**Files:**
+- Create: `src/Support/UsersListQueryFilter.php`
+- Test: `tests/Feature/UsersListQueryFilterTest.php`
+
+- [ ] **Step 1: Write the failing test** (asserts the SQL guards/mappings via `toSql()`)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Glueful\Extensions\Users\Tests\Feature;
+
+use Glueful\Extensions\Users\Support\UsersListQueryFilter;
+use Glueful\Extensions\Users\Tests\Support\AppTestCase;
+use Glueful\Database\QueryBuilder;
+use Symfony\Component\HttpFoundation\Request;
+
+final class UsersListQueryFilterTest extends AppTestCase
+{
+    private function baseQuery(): QueryBuilder
+    {
+        return $this->db()->table('users')
+            ->selectRaw('users.uuid AS uuid')
+            ->leftJoin('profiles', 'profiles.user_uuid', '=', 'users.uuid')
+            ->whereNull('users.deleted_at');
+    }
+
+    /** lowercased SQL with identifier quoting stripped, for robust substring checks */
+    private function sql(QueryBuilder $qb): string
+    {
+        return strtolower(str_replace(['`', '"'], '', $qb->toSql()));
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->bootApp();
+    }
+
+    public function test_profile_filter_is_guarded_and_qualified(): void
+    {
+        $req = Request::create('/users', 'GET', ['filter' => ['profile' => ['first_name' => 'Jane']]]);
+        $sql = $this->sql((new UsersListQueryFilter($req))->apply($this->baseQuery()));
+        self::assertStringContainsString('profiles.first_name', $sql);
+        self::assertStringContainsString('profiles.deleted_at is null', $sql);
+    }
+
+    public function test_search_guards_profile_branches_but_not_username(): void
+    {
+        $req = Request::create('/users', 'GET', ['search' => 'jane']);
+        $sql = $this->sql((new UsersListQueryFilter($req))->apply($this->baseQuery()));
+        self::assertStringContainsString('users.username like', $sql);
+        self::assertStringContainsString('profiles.first_name like', $sql);
+        self::assertStringContainsString('profiles.deleted_at is null', $sql);
+    }
+
+    public function test_sort_maps_and_guards_profile_column(): void
+    {
+        $req = Request::create('/users', 'GET', ['sort' => 'first_name']);
+        $sql = $this->sql((new UsersListQueryFilter($req))->apply($this->baseQuery()));
+        self::assertStringContainsString('case when profiles.deleted_at is null then profiles.first_name', $sql);
+    }
+
+    public function test_default_sort_is_created_at_desc(): void
+    {
+        $req = Request::create('/users', 'GET');
+        $sql = $this->sql((new UsersListQueryFilter($req))->apply($this->baseQuery()));
+        self::assertStringContainsString('order by users.created_at desc', $sql);
+    }
+
+    public function test_email_filter_ignored_unless_allowed(): void
+    {
+        $req = Request::create('/users', 'GET', ['filter' => ['email' => 'a@b.c']]);
+        $off = $this->sql((new UsersListQueryFilter($req, false))->apply($this->baseQuery()));
+        self::assertStringNotContainsString('users.email', $off);
+
+        $on = $this->sql((new UsersListQueryFilter($req, true))->apply($this->baseQuery()));
+        self::assertStringContainsString('users.email', $on);
+    }
+
+    public function test_status_is_not_filterable(): void
+    {
+        $req = Request::create('/users', 'GET', ['filter' => ['status' => 'active']]);
+        $sql = $this->sql((new UsersListQueryFilter($req))->apply($this->baseQuery()));
+        self::assertStringNotContainsString('status', $sql);
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `composer test -- --filter=UsersListQueryFilterTest`
+Expected: FAIL — class not found.
+
+- [ ] **Step 3: Implement `UsersListQueryFilter`**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Glueful\Extensions\Users\Support;
+
+use Glueful\Api\Filtering\QueryFilter;
+use Glueful\Api\Filtering\ParsedSort;
+use Glueful\Api\Filtering\Operators\OperatorRegistry;
+use Symfony\Component\HttpFoundation\Request;
+
+/**
+ * QueryFilter for GET /users over a `users LEFT JOIN profiles` query. Public field names are mapped
+ * to table-qualified columns, and every profile predicate is guarded with `profiles.deleted_at IS
+ * NULL` so a soft-deleted profile can never drive membership or ordering. `$searchable` is kept in
+ * PUBLIC names so core's `?search_fields=` intersection works; qualification happens at emit time.
+ */
+final class UsersListQueryFilter extends QueryFilter
+{
+    protected ?string $defaultSort = '-created_at';
+
+    /** public sort field => qualified column */
+    private const SORT_MAP = [
+        'username'   => 'users.username',
+        'created_at' => 'users.created_at',
+        'first_name' => 'profiles.first_name',
+        'last_name'  => 'profiles.last_name',
+    ];
+    private const PROFILE_SORT = ['first_name', 'last_name'];
+
+    public function __construct(Request $request, private bool $allowEmailFilter = false)
+    {
+        parent::__construct($request);
+
+        $this->sortable   = ['username', 'created_at', 'first_name', 'last_name'];
+        $this->filterable = ['profile.first_name', 'profile.last_name'];
+        $this->searchable = ['username', 'profile.first_name', 'profile.last_name'];
+
+        if ($this->allowEmailFilter) {
+            $this->filterable[] = 'email';
+            $this->searchable[] = 'email';
+        }
+    }
+
+    public function filterProfileFirstName(mixed $value, string $operator): void
+    {
+        OperatorRegistry::get($operator)->apply($this->query, 'profiles.first_name', $value);
+        $this->query->whereNull('profiles.deleted_at');
+    }
+
+    public function filterProfileLastName(mixed $value, string $operator): void
+    {
+        OperatorRegistry::get($operator)->apply($this->query, 'profiles.last_name', $value);
+        $this->query->whereNull('profiles.deleted_at');
+    }
+
+    public function filterEmail(mixed $value, string $operator): void
+    {
+        OperatorRegistry::get($operator)->apply($this->query, 'users.email', $value);
+    }
+
+    /**
+     * Override: qualify each searchable field and AND a `profiles.deleted_at IS NULL` guard onto
+     * every PROFILE branch (the username branch stays unguarded so a username match still surfaces a
+     * soft-deleted-profile user — with the profile nulled later). Built as one raw OR group so the
+     * per-branch guard binds correctly.
+     */
+    protected function applySearch(string $search): void
+    {
+        $fields = $this->getSearchableFields(); // public names ∩ ?search_fields
+        $conds = [];
+        $bind = [];
+        foreach ($fields as $public) {
+            $qualified = $this->mapField($public);
+            if ($qualified === null) {
+                continue;
+            }
+            if (str_starts_with($public, 'profile.')) {
+                $conds[] = "($qualified LIKE ? AND profiles.deleted_at IS NULL)";
+            } else {
+                $conds[] = "$qualified LIKE ?";
+            }
+            $bind[] = "%{$search}%";
+        }
+        if ($conds === []) {
+            return;
+        }
+        $this->query->whereRaw('(' . implode(' OR ', $conds) . ')', $bind);
+    }
+
+    /**
+     * Override: core sorts by the parsed field directly. Map public → qualified, and emit profile
+     * sorts via a CASE so a soft-deleted profile contributes a NULL sort key (no ordering leak).
+     */
+    protected function applySort(ParsedSort $sort): void
+    {
+        if (!$this->isSortable($sort->field)) {
+            return;
+        }
+        $col = self::SORT_MAP[$sort->field] ?? null;
+        if ($col === null) {
+            return;
+        }
+        $dir = $sort->direction === ParsedSort::DIRECTION_DESC ? 'DESC' : 'ASC';
+
+        if (in_array($sort->field, self::PROFILE_SORT, true)) {
+            $this->query->orderByRaw("CASE WHEN profiles.deleted_at IS NULL THEN $col END $dir");
+        } else {
+            $this->query->orderBy($col, $dir);
+        }
+    }
+
+    private function mapField(string $public): ?string
+    {
+        return match ($public) {
+            'username'           => 'users.username',
+            'email'              => 'users.email',
+            'profile.first_name' => 'profiles.first_name',
+            'profile.last_name'  => 'profiles.last_name',
+            default              => null,
+        };
+    }
+}
+```
+
+- [ ] **Step 4: Run to pass**
+
+Run: `composer test -- --filter=UsersListQueryFilterTest`
+Expected: PASS (6 tests). If `toSql()` quoting differs, adjust the `sql()` normalizer — keep the asserted tokens (`profiles.deleted_at is null`, `case when`, `users.created_at desc`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/Support/UsersListQueryFilter.php tests/Feature/UsersListQueryFilterTest.php
+git commit -m "feat(users): UsersListQueryFilter with soft-delete-guarded profile predicates"
+```
+
+---
+
+## Phase 2 · Task 3: Repository reader `paginateUsersWithProfiles()`
+
+**Files:**
+- Modify: `src/Repositories/UserRepository.php`
+- Test: `tests/Feature/UserListReaderTest.php`
+
+- [ ] **Step 1: Write the failing test**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Glueful\Extensions\Users\Tests\Feature;
+
+use Glueful\Extensions\Users\Repositories\UserRepository;
+use Glueful\Extensions\Users\Support\UsersListQueryFilter;
+use Glueful\Extensions\Users\Tests\Support\AppTestCase;
+use Symfony\Component\HttpFoundation\Request;
+
+final class UserListReaderTest extends AppTestCase
+{
+    private UserRepository $repo;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->bootApp();
+        $this->repo = new UserRepository($this->app->getContainer()->get('database'), null, $this->context);
+        $this->seedUser('u-1', 'a@x.com', 'alice');
+        $this->seedProfile('u-1', 'Alice', 'Adams');
+        $this->seedUser('u-2', 'b@x.com', 'bob'); // no profile
+    }
+
+    private function filter(array $query = []): UsersListQueryFilter
+    {
+        return new UsersListQueryFilter(Request::create('/users', 'GET', $query));
+    }
+
+    public function test_returns_pagination_envelope_and_aliased_rows(): void
+    {
+        $res = $this->repo->paginateUsersWithProfiles(['uuid', 'username'], ['first_name', 'last_name'], $this->filter(), 1, 25);
+
+        self::assertArrayHasKey('data', $res);
+        self::assertSame(2, $res['total']);
+        $row = $res['data'][0];
+        self::assertArrayHasKey('uuid', $row);
+        self::assertArrayHasKey('profile__first_name', $row);
+        self::assertArrayHasKey('_p_present', $row);
+        self::assertArrayHasKey('_p_deleted_at', $row);
+    }
+
+    public function test_user_without_profile_has_null_present_marker(): void
+    {
+        $res = $this->repo->paginateUsersWithProfiles(['uuid'], ['first_name'], $this->filter(), 1, 25);
+        $byUuid = array_column($res['data'], null, 'uuid');
+        self::assertNull($byUuid['u-2']['_p_present'], 'no-profile user → null present marker');
+        self::assertNotNull($byUuid['u-1']['_p_present']);
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `composer test -- --filter=UserListReaderTest`
+Expected: FAIL — method not defined.
+
+- [ ] **Step 3: Add the reader** (next to `findProfileRow()` in `UserRepository`)
+
+```php
+    /**
+     * Paginated `users LEFT JOIN profiles` reader for GET /users. Selects explicit, aliased columns
+     * (account as-is; profile as `profile__<col>`) plus two control columns — `_p_present`
+     * (profiles.user_uuid; null ⇒ no profile) and `_p_deleted_at` — used by the responder to PHP-null
+     * absent/soft-deleted profiles. The QueryFilter (already soft-delete-guarded) is applied before
+     * pagination. Soft-deleted USERS are excluded via `users.deleted_at IS NULL`.
+     *
+     * @param list<string> $accountCols effective `users` columns (never empty; resolver forces uuid)
+     * @param list<string> $profileCols effective `profiles` columns (may be empty)
+     * @return array{data: array<int,array<string,mixed>>, current_page:int, per_page:int, total:int, last_page:int, has_more:bool, from:int, to:int}
+     */
+    public function paginateUsersWithProfiles(
+        array $accountCols,
+        array $profileCols,
+        \Glueful\Api\Filtering\QueryFilter $filter,
+        int $page,
+        int $perPage
+    ): array {
+        $select = [];
+        foreach ($accountCols as $c) {
+            $select[] = "users.$c AS $c";
+        }
+        foreach ($profileCols as $c) {
+            $select[] = "profiles.$c AS profile__$c";
+        }
+        $select[] = 'profiles.user_uuid AS _p_present';
+        $select[] = 'profiles.deleted_at AS _p_deleted_at';
+
+        $qb = $this->db->table('users')
+            ->selectRaw(implode(', ', $select))
+            ->leftJoin('profiles', 'profiles.user_uuid', '=', 'users.uuid')
+            ->whereNull('users.deleted_at');
+
+        $filter->apply($qb);
+
+        return $qb->paginate($page, $perPage);
+    }
+```
+
+- [ ] **Step 4: Run to pass**
+
+Run: `composer test -- --filter=UserListReaderTest`
+Expected: PASS (2 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/Repositories/UserRepository.php tests/Feature/UserListReaderTest.php
+git commit -m "feat(users): paginated users+profiles reader (aliased, soft-delete-scoped)"
+```
+
+---
+
+## Phase 2 · Task 4: `ProfileResponder::buildList()` + reconstruction (the no-leak behavior)
+
+**Files:**
+- Modify: `src/Support/ProfileResponder.php`
+- Test: `tests/Feature/UserListResponderTest.php`
+
+- [ ] **Step 1: Write the failing tests** (the behavioral no-leak suite)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Glueful\Extensions\Users\Tests\Feature;
+
+use Glueful\Extensions\Users\Repositories\UserRepository;
+use Glueful\Extensions\Users\Support\PayloadProjector;
+use Glueful\Extensions\Users\Support\ProfileFieldResolver;
+use Glueful\Extensions\Users\Support\ProfileResponder;
+use Glueful\Extensions\Users\Tests\Support\AppTestCase;
+use Symfony\Component\HttpFoundation\Request;
+
+final class UserListResponderTest extends AppTestCase
+{
+    private ProfileResponder $responder;
+
+    /** @param array<string,mixed> $usersConfig */
+    private function boot(array $usersConfig = []): void
+    {
+        $base = [
+            'account_fields' => ['users' => ['id', 'uuid', 'username']],
+            'profile_fields' => ['users' => ['first_name', 'last_name', 'photo_url']],
+            'user_lookup'    => ['enabled' => true, 'list' => ['enabled' => true, 'allow_email_filter' => false]],
+        ];
+        $this->bootApp(['users.php' => var_export(array_replace_recursive($base, $usersConfig), true)]);
+        $repo = new UserRepository($this->app->getContainer()->get('database'), null, $this->context);
+        $this->responder = new ProfileResponder($this->context, $repo, new ProfileFieldResolver(), new PayloadProjector());
+
+        $this->seedUser('u-1', 'a@x.com', 'alice');
+        $this->seedProfile('u-1', 'Jane', 'Adams');           // first_name Jane
+        $this->seedUser('u-2', 'b@x.com', 'bob');             // no profile
+        $this->seedUser('u-3', 'c@x.com', 'carol');
+        $this->seedProfile('u-3', 'Jane', 'Carter');          // first_name Jane, will be soft-deleted
+        $this->db()->table('profiles')->where(['user_uuid' => 'u-3'])->update(['deleted_at' => '2026-01-01 00:00:00']);
+    }
+
+    private function req(string $qs = ''): Request
+    {
+        return Request::create('/users' . ($qs !== '' ? "?$qs" : ''), 'GET');
+    }
+
+    public function test_plain_list_includes_all_three_with_profile_nulled_for_absent_and_deleted(): void
+    {
+        $this->boot();
+        $out = $this->responder->buildList('users', $this->req(), 1, 25);
+        $byUuid = array_column($out['items'], null, 'uuid');
+
+        self::assertCount(3, $out['items']);
+        self::assertSame('Jane', $byUuid['u-1']['profile']['first_name']);
+        self::assertNull($byUuid['u-2']['profile'], 'no-profile → null');
+        self::assertNull($byUuid['u-3']['profile'], 'soft-deleted profile → null');
+        self::assertArrayNotHasKey('email', $byUuid['u-1'], 'users audience excludes email');
+    }
+
+    public function test_search_does_not_match_via_soft_deleted_profile(): void
+    {
+        $this->boot();
+        $out = $this->responder->buildList('users', $this->req('search=Jane'), 1, 25);
+        $uuids = array_column($out['items'], 'uuid');
+        self::assertContains('u-1', $uuids, 'active Jane matches');
+        self::assertNotContains('u-3', $uuids, 'soft-deleted Jane must NOT match (no leak)');
+    }
+
+    public function test_filter_excludes_soft_deleted_profile(): void
+    {
+        $this->boot();
+        $out = $this->responder->buildList('users', $this->req('filter[profile][first_name]=Jane'), 1, 25);
+        $uuids = array_column($out['items'], 'uuid');
+        self::assertSame(['u-1'], $uuids);
+    }
+
+    public function test_per_item_field_projection(): void
+    {
+        $this->boot();
+        $out = $this->responder->buildList('users', $this->req('fields=username,profile.first_name'), 1, 25);
+        $byUuid = array_column($out['items'], null, 'username');
+        self::assertSame(['username', 'profile'], array_keys($byUuid['alice']));
+        self::assertSame(['first_name' => 'Jane'], $byUuid['alice']['profile']);
+    }
+
+    public function test_pagination_metadata_outside_items(): void
+    {
+        $this->boot();
+        $out = $this->responder->buildList('users', $this->req(), 1, 2);
+        self::assertSame(1, $out['pagination']['page']);
+        self::assertSame(2, $out['pagination']['per_page']);
+        self::assertSame(3, $out['pagination']['total']);
+        self::assertSame(2, $out['pagination']['total_pages']);
+        self::assertCount(2, $out['items']);
+    }
+
+    public function test_sort_not_affected_by_soft_deleted_profile_value(): void
+    {
+        $this->boot();
+        // Tight active cluster (Maa < Mac) plus a soft-deleted 'Mab' that WOULD sort between them.
+        $this->seedUser('s-a', 'sa@x.com', 'usera');
+        $this->seedProfile('s-a', 'Maa', 'X');
+        $this->seedUser('s-b', 'sb@x.com', 'userb');
+        $this->seedProfile('s-b', 'Mac', 'X');
+        $this->seedUser('s-c', 'sc@x.com', 'userc');
+        $this->seedProfile('s-c', 'Mab', 'X');
+        $this->db()->table('profiles')->where(['user_uuid' => 's-c'])->update(['deleted_at' => '2026-01-01 00:00:00']);
+
+        $out = $this->responder->buildList('users', $this->req('sort=first_name&per_page=100'), 1, 100);
+        $uuids = array_column($out['items'], 'uuid');
+        $pa = array_search('s-a', $uuids, true);
+        $pb = array_search('s-b', $uuids, true);
+        $pc = array_search('s-c', $uuids, true);
+        self::assertNotFalse($pa);
+        self::assertNotFalse($pb);
+        self::assertNotFalse($pc);
+
+        // Engine-independent: if the deleted 'Mab' leaked into ordering, s-c would sit BETWEEN s-a
+        // (Maa) and s-b (Mac). The CASE guard nulls its sort key, pushing it to a NULL end instead.
+        $between = $pc > min($pa, $pb) && $pc < max($pa, $pb);
+        self::assertFalse($between, 'soft-deleted profile value must not affect sort order');
+        self::assertLessThan($pb, $pa, 'active users keep their real relative order (Maa before Mac)');
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `composer test -- --filter=UserListResponderTest`
+Expected: FAIL — `buildList()` not defined.
+
+- [ ] **Step 3: Add `buildList()` + `reconstructRow()` to `ProfileResponder`**
+
+Add the import near the top:
+
+```php
+use Glueful\Extensions\Users\Support\UsersListQueryFilter;
+```
+
+Add the methods:
+
+```php
+    /**
+     * Build a paginated list of users (audience 'users') + nested basic profile.
+     * @return array{items: list<array<string,mixed>>, pagination: array<string,mixed>}
+     */
+    public function buildList(string $audience, Request $request, int $page, int $perPage): array
+    {
+        $schema = Connection::fromContext($this->context)->getSchemaBuilder();
+        $realAccount = array_column($schema->getTableColumns('users'), 'name');
+        $realProfile = array_column($schema->getTableColumns('profiles'), 'name');
+
+        $configured = [
+            'account' => (array) config($this->context, "users.account_fields.$audience", []),
+            'profile' => (array) config($this->context, "users.profile_fields.$audience", []),
+        ];
+        $eff = $this->resolver->resolve($configured, $realAccount, $realProfile);
+
+        $allowEmail = (bool) config($this->context, 'users.user_lookup.list.allow_email_filter', false);
+        $filter = new UsersListQueryFilter($request, $allowEmail);
+
+        $result = $this->users->paginateUsersWithProfiles($eff['account'], $eff['profile'], $filter, $page, $perPage);
+
+        $fields = $request->query->all()['fields'] ?? null;
+        $fields = is_string($fields) ? $fields : null;
+
+        $items = [];
+        foreach ($result['data'] as $row) {
+            $merged = $this->reconstructRow($row);
+            $items[] = $this->projector->project($merged, $eff['allow'], $fields);
+        }
+
+        return [
+            'items' => $items,
+            'pagination' => [
+                'page'        => $result['current_page'],
+                'per_page'    => $result['per_page'],
+                'total'       => $result['total'],
+                'total_pages' => $result['last_page'],
+                'has_more'    => $result['has_more'],
+            ],
+        ];
+    }
+
+    /**
+     * Split one flat aliased join row into account scalars + nested `profile`. The control columns
+     * `_p_present` (null ⇒ no profile) and `_p_deleted_at` (non-null ⇒ soft-deleted) null the profile.
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function reconstructRow(array $row): array
+    {
+        $present = $row['_p_present'] ?? null;
+        $deleted = $row['_p_deleted_at'] ?? null;
+
+        $account = [];
+        $profile = [];
+        foreach ($row as $k => $v) {
+            if ($k === '_p_present' || $k === '_p_deleted_at') {
+                continue;
+            }
+            if (str_starts_with($k, 'profile__')) {
+                $profile[substr($k, strlen('profile__'))] = $v;
+            } else {
+                $account[$k] = $v;
+            }
+        }
+
+        $nested = ($present === null || $deleted !== null) ? null : $profile;
+        return [...$account, 'profile' => $nested];
+    }
+```
+
+- [ ] **Step 4: Run to pass**
+
+Run: `composer test -- --filter=UserListResponderTest`
+Expected: PASS (6 tests). The `search`/`filter`/`sort` no-leak tests are the security regression guards.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/Support/ProfileResponder.php tests/Feature/UserListResponderTest.php
+git commit -m "feat(users): ProfileResponder::buildList — reconstruct + project, no soft-delete leak"
+```
+
+---
+
+## Phase 2 · Task 5: `UserController::index()` + route + gated wiring
+
+**Files:**
+- Modify: `src/Controllers/UserController.php`
+- Create: `routes/user-list.php`
+- Modify: `src/UsersServiceProvider.php`
+- Modify: `tests/Feature/ProviderWiringTest.php`
+
+- [ ] **Step 1: Add `index()` to `UserController`** (clamps page/per_page, returns the envelope)
+
+```php
+    /** GET /users — paginated list of users + nested public profile. */
+    #[RequiresPermission('users.read')]
+    public function index(Request $request): Response
+    {
+        $ctx = $this->getContext();
+        $defaultPer = (int) config($ctx, 'users.user_lookup.list.per_page.default', 25);
+        $maxPer = (int) config($ctx, 'users.user_lookup.list.per_page.max', 100);
+
+        $q = $request->query->all();
+        $page = (isset($q['page']) && is_numeric($q['page'])) ? max(1, (int) $q['page']) : 1;
+        $perPage = (isset($q['per_page']) && is_numeric($q['per_page'])) ? (int) $q['per_page'] : $defaultPer;
+        $perPage = max(1, min($perPage, $maxPer));
+
+        return $this->success($this->responder->buildList('users', $request, $page, $perPage));
+    }
+```
+
+- [ ] **Step 2: Create `routes/user-list.php`**
+
+```php
+<?php
+
+/**
+ * glueful/users user-list route — GET /users (paginated). Loaded by UsersServiceProvider::register()
+ * ONLY when user_lookup.enabled AND user_lookup.list.enabled are both true (config-gated in
+ * register() where the context is available), so it registers unconditionally here.
+ *
+ * @var \Glueful\Routing\Router $router
+ */
+
+use Glueful\Extensions\Users\Controllers\UserController;
+
+/**
+ * @route GET /users
+ * @summary List Users
+ * @description Paginated list of users + nested public profile (the `users` audience). Off by
+ *   default; enabled via `USERS_USER_LIST_ENABLED=true`. Requires the `users.read` permission.
+ *   Supports `?page`/`?per_page` (clamped), per-item `?fields=`, and `?filter[...]`/`?sort`/`?search`
+ *   over username + profile name (email only when `allow_email_filter`). Soft-deleted profiles never
+ *   affect membership or order.
+ * @tag Users
+ * @requiresAuth true
+ * @response 200 application/json "Paginated users" {
+ *   success:boolean="true",
+ *   message:string="Success message",
+ *   data:{
+ *     items:array="Projected user payloads (account + nested profile|null)",
+ *     pagination:{ page:integer, per_page:integer, total:integer, total_pages:integer, has_more:boolean }
+ *   },
+ * }
+ * @response 401 "Authentication required"
+ * @response 403 "Missing the users.read permission"
+ */
+$router->get('/users', [UserController::class, 'index'])
+    ->middleware(['auth', 'gate_permissions'])
+    ->name('users.index');
+```
+
+- [ ] **Step 3: Gate the route in `UsersServiceProvider::register()`**
+
+After the existing `user-lookup.php` block, add:
+
+```php
+        if (
+            (bool) config($context, 'users.user_lookup.enabled', false)
+            && (bool) config($context, 'users.user_lookup.list.enabled', false)
+        ) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/user-list.php');
+        }
+```
+
+- [ ] **Step 4: Add wiring tests** (append to `ProviderWiringTest`; order-independent — no `@runInSeparateProcess`, since `Framework::boot()` is incompatible with it)
+
+```php
+    public function test_user_list_route_file_registers_route(): void
+    {
+        $this->bootApp();
+        $router = $this->loadRouteFile('/routes/user-list.php');
+        self::assertNotNull($router->match(Request::create('/users', 'GET')), '/users registered by routes/user-list.php');
+    }
+
+    public function test_list_route_absent_unless_both_flags(): void
+    {
+        // lookup on, list off → no /users
+        $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>false]]]"]);
+        $router = $this->registerProvider();
+        self::assertNull($router->match(Request::create('/users', 'GET')), 'list gated off when list.enabled=false');
+    }
+
+    public function test_list_route_present_when_both_flags(): void
+    {
+        $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>true]]]"]);
+        $router = $this->registerProvider();
+        self::assertNotNull($router->match(Request::create('/users', 'GET')), 'list registered when both flags on');
+    }
+
+    public function test_index_method_carries_requires_permission(): void
+    {
+        $rm = new \ReflectionMethod(\Glueful\Extensions\Users\Controllers\UserController::class, 'index');
+        $attrs = $rm->getAttributes(\Glueful\Auth\Attributes\RequiresPermission::class);
+        self::assertCount(1, $attrs);
+        self::assertSame('users.read', $attrs[0]->newInstance()->name);
+    }
+```
+
+> `test_user_list_route_file_registers_route` (direct require → robust) is the sole loader of `routes/user-list.php` via `loadRouteFile()`; the two `register()` gating tests load it through `loadRoutesFrom()` only in the "both flags" case, so its presence/absence is order-independent.
+
+- [ ] **Step 5: Run the suite**
+
+Run: `composer test`
+Expected: PASS (all Phase 1 + Phase 2 tests).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/Controllers/UserController.php routes/user-list.php src/UsersServiceProvider.php tests/Feature/ProviderWiringTest.php
+git commit -m "feat(users): GET /users endpoint + double-gated route wiring"
+```
+
+---
+
+## Phase 2 · Task 6: Docs + final verification
+
+**Files:**
+- Modify: `README.md`
+
+- [ ] **Step 1: Extend the "Account read endpoints" section**
+
+Add under the existing endpoint list:
+
+````markdown
+- `GET /users` — paginated list of users + nested public profile. **Off by default** (requires both `USERS_USER_LOOKUP_ENABLED=true` and `USERS_USER_LIST_ENABLED=true`), requires the `users.read` permission.
+
+```bash
+GET /users?page=1&per_page=25                    # clamped: per_page max 100
+GET /users?sort=-created_at                        # default; or username/first_name/last_name
+GET /users?filter[profile][first_name]=Jane        # filter by profile field
+GET /users?search=jane                             # username + profile names (email only if enabled)
+GET /users?fields=username,profile.first_name      # per-item field selection
+```
+
+Email is filterable/searchable only when `USERS_USER_LIST_ALLOW_EMAIL_FILTER=true`. `status` is not filterable by default. Soft-deleted profiles never affect membership or ordering.
+````
+
+- [ ] **Step 2: Run the full suite + static analysis**
+
+Run: `composer test && composer analyse`
+Expected: all PASS; PHPStan clean. Also run `composer test -- --order-by=random` once to confirm order-independence.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add README.md
+git commit -m "docs(users): document GET /users list endpoint (Phase 2)"
+```
+
+---
+
+## Phase 2 self-review notes
+
+- **Spec coverage:** two-level gate (T1 config + T5 register) · clamp page/per_page (T5 controller) · LEFT JOIN no-N+1 (T3) · guarded profile filter/search/sort (T2) · `{items, pagination}` shape (T4) · per-item projection (T4) · email gating (T2/config) · `status` excluded (T2) · no-leak search/filter/sort + no-profile + soft-deleted presence (T4) · gating present/absent + `RequiresPermission` (T5).
+- **Type consistency:** `UsersListQueryFilter::__construct(Request, bool $allowEmailFilter=false)`; custom filters `filterProfileFirstName(mixed,string)`/`filterProfileLastName(mixed,string)`/`filterEmail(mixed,string)`; `UserRepository::paginateUsersWithProfiles(list, list, QueryFilter, int, int): array`; `ProfileResponder::buildList(string,Request,int,int): array{items,pagination}`; control aliases `_p_present`/`_p_deleted_at`, profile alias prefix `profile__`.
+- **Soft-delete guards** are the security floor: `filter*()` AND `whereNull('profiles.deleted_at')`; `applySearch()` per-branch guard via `whereRaw`; `applySort()` `orderByRaw(CASE … END)`. Each has a **behavioral** no-leak regression test in T4 (filter, search, **and** sort — the sort test asserts a soft-deleted value can't interleave between two active users, engine-independently); the T2 SQL-shape tests are the secondary guard that the right SQL is emitted.
+- **`$searchable` holds public names** so core's `?search_fields=` intersection matches; qualification is done in `applySearch()`/`mapField()`.
+- **Pagination floors** (`page>=1`, `per_page` in `[1, max]`) avoid `validatePagination()` throwing on `limit<=0`/`offset<0`.

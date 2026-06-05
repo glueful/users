@@ -27,7 +27,7 @@ Today there is no first-class way to read the authenticated user's full account 
 ## Non-goals
 
 - Writing/updating the account (covered by existing account-lifecycle flows).
-- Listing/searching users (`GET /users` collection) — out of scope.
+- Listing/searching users (`GET /users` collection) — **not in Phase 1**; designed as **Phase 2** below (ships after `/me` + `/users/{uuid}`).
 - Changing framework core. Both endpoints live in the extension.
 - Making the `FieldSelectionMiddleware` envelope-aware (noted as a future framework follow-up, not part of this work).
 
@@ -266,10 +266,101 @@ Framework/extension library tests (PHPUnit 10, lightweight SQLite `Connection` h
 
 Both endpoints can ship in one PR ("add both now"); the order above is the safe internal sequence.
 
+## Phase 2: `GET /users` collection (paginated list)
+
+> Ships **after** Phase 1 (`/me` + `/users/{uuid}`). Reuses Phase 1's column resolution (`users` audience), `PayloadProjector`, the `users.read` permission, and the config-gated route-loading pattern. Listing is a strictly larger surface than a known-UUID lookup, so it carries an **additional** gate and a conservative filter posture.
+
+### Contract & gating
+
+- `GET /users` — paginated list of users, each as a projected account payload + nested basic `profile` (the **`users` audience** columns, same as `/users/{uuid}`).
+- **Two-level gate:** registered only when `user_lookup.enabled` (master, shared with `/users/{uuid}`) **and** `user_lookup.list.enabled` (new, default **off**) are both true. Lives in a new `routes/user-list.php` that `register()` loads under that combined condition — route files can't read `config()` (no context in scope), so gating stays in `register()`, consistent with `user-lookup.php`.
+- **Permission:** same `#[RequiresPermission('users.read')]` on `UserController::index()`.
+- **Query params:**
+  - `?page` (default 1, **min 1**) and `?per_page` (default 25, **max 100**) — both **clamped/soft-normalized before `paginate()`** (non-numeric → default; over-max → max; under-min → min). This avoids the query builder's pagination validation errors and matches the field-selector's "normalize, don't 400" philosophy.
+  - `?fields=` — per-item REST projection, reusing `PayloadProjector` with the `users`-audience allow-list (applied to **each** item).
+  - `?filter[...]`, `?sort`, `?search` — via `UsersListQueryFilter` (below).
+
+### Config additions
+
+```php
+'user_lookup' => [
+    'enabled' => env('USERS_USER_LOOKUP_ENABLED', false),     // master (Phase 1)
+    'list' => [
+        'enabled'            => env('USERS_USER_LIST_ENABLED', false),              // separate, bigger-surface gate
+        'allow_email_filter' => env('USERS_USER_LIST_ALLOW_EMAIL_FILTER', false),   // email in filter/search
+        'per_page'           => ['default' => 25, 'max' => 100],
+        'default_sort'       => '-created_at',                                       // QueryFilter '-' = DESC (newest first)
+    ],
+],
+```
+
+### Query: single LEFT JOIN (no N+1)
+
+- `SELECT` the effective **`users`** columns + effective **`profiles`** columns (profile columns **aliased** to avoid the `uuid`/`status`/`created_at`/`updated_at`/`deleted_at` collisions between the two tables, e.g. `profiles.first_name AS profile__first_name`) `FROM users LEFT JOIN profiles ON profiles.user_uuid = users.uuid WHERE users.deleted_at IS NULL` + filter/search/sort + `LIMIT/OFFSET`.
+- `profiles.user_uuid` is **UNIQUE** → exactly one row per user (1:0..1), so the join doesn't multiply rows and pagination counts stay correct. The join **replaces** Phase 1's separate `getProfilesForUsers()` bulk step — one query, no N+1.
+- **Soft-deleted profiles — privacy (the leak we must close).** A soft-deleted profile must not influence the result **at all** — not membership, not ordering — otherwise its data leaks even when the response shows `"profile": null` (e.g. `?search=Jane` returning a user whose only "Jane" lives in a deleted profile). Two builder facts (verified) constrain the fix:
+  - `leftJoin(table, first, op, second)` is **column-to-column only** — `AND profiles.deleted_at IS NULL` can't go in the ON clause.
+  - `JoinClause` **identifier-wraps** the table arg, so a derived-table join (`LEFT JOIN (SELECT … WHERE deleted_at IS NULL) p`) is **not expressible** through the builder; a true filtered-source join would require a raw-SQL reader, which then can't use `QueryFilter` (it operates on a `QueryBuilder`).
+- **Chosen approach — SQL-level exclusion via guarded predicates (keeps `QueryFilter`):** the base query uses an **unconditioned** `leftJoin(profiles)` (so a plain list still includes every non-deleted *user*, with their profile PHP-nulled if absent or soft-deleted — the two presence requirements hold). Every place a **profile column** participates is **guarded with `profiles.deleted_at IS NULL`** so deleted profiles can never affect the outcome:
+  - **filter:** each `filterProfile*()` method ANDs `profiles.deleted_at IS NULL` onto its condition → a deleted-profile match is excluded (correct filter semantics: you asked for users whose *current* profile matches).
+  - **search:** `applySearch()` is overridden so each profile-field `LIKE` is wrapped as `(profiles.<col> LIKE ? AND profiles.deleted_at IS NULL)`; the `users.username` branch is unguarded, so a user who matches by username still appears (profile PHP-nulled) without their deleted-profile data ever causing the match.
+  - **sort:** `applySort()` emits profile sorts via `orderByRaw("CASE WHEN profiles.deleted_at IS NULL THEN profiles.<col> END <dir>")` so a deleted profile's value contributes a NULL sort key — it can't leak ordering.
+  - **response:** the nested `profile` is PHP-nulled when the joined profile is absent **or** its `deleted_at` is set (defense in depth; the guards already keep deleted data out of matching/order).
+  This closes the leak at the SQL level while staying builder-native. **This is the committed v1 approach.** *(Rejected simpler alternative, for the record: keep profile fields in the **response** via a post-pagination `getProfilesForUsers()` bulk-load with `whereNull('deleted_at')` and make **only `users` columns** filter/sort/searchable — zero leak with much less code, but it drops profile filtering/sorting/search, which is in scope for this endpoint.)*
+
+### `UsersListQueryFilter` (public → qualified mapping)
+
+A subclass of `Glueful\Api\Filtering\QueryFilter`. The **public API uses simple/dotted names** (the parser turns `?filter[profile][first_name]=…` into the field `profile.first_name`); internally they map to **table-qualified** columns so the join stays unambiguous. `$defaultSort = '-created_at'` (the framework's `-`-prefix = DESC convention; `getDefaultSorts()` parses it — no custom convention).
+
+- **Searchable** — keep `$searchable` in **public** names: `username`, `profile.first_name`, `profile.last_name` (+ `email` **only when** `allow_email_filter`). The overridden `applySearch()` does the public→qualified mapping (`profile.first_name → profiles.first_name`, `username → users.username`, …) **and** guards each *profile* field's `LIKE` with `AND profiles.deleted_at IS NULL` (the `username` branch stays unguarded). Public names are required because core `getSearchableFields()` intersects the request's `?search_fields=` against `$this->searchable` — qualified names there would never match a public `search_fields` value (so a `search_fields=profile.first_name` would silently drop).
+- **Sortable** — public `username`, `created_at`, `first_name`, `last_name`. Core `applySort()` calls `orderBy($parsedField)` directly (no custom dispatch), so **override `applySort()`** to (a) map public → qualified column (resolving `created_at` → `users.created_at`) and (b) emit profile sorts via `orderByRaw("CASE WHEN profiles.deleted_at IS NULL THEN profiles.<col> END <dir>")`.
+- **Filterable** — `$filterable` whitelist includes `profile.first_name` / `profile.last_name`, dispatched by `studly()` to the exact custom methods **`filterProfileFirstName(mixed $value, string $operator)`** and **`filterProfileLastName(mixed $value, string $operator)`**, each qualifying to `profiles.*` **and ANDing `profiles.deleted_at IS NULL`**. `email` (as `email`, qualified to `users.email`) only when `allow_email_filter`. **`status` is deliberately excluded by default** — it leaks operational state; an app opts it in explicitly if external admins genuinely need it.
+
+`email`-gating, `status`-exclusion, and the soft-delete guards are the security posture; the whitelists are config-extensible by apps.
+
+**Implementation notes (carry into the plan):**
+- **Custom filter `$value` is `mixed`, not `string`.** Core dispatches `call_user_func([$this, $method], $filter->value, $filter->operator)`, and `$filter->value` is an **array** for operator-array filters (`in`, `between`, …, e.g. `?filter[profile][first_name][in]=a,b`). Typing the param `string` would `TypeError`. Each `filterProfile*()` handles the operator via the operator registry (or restricts to the operators it supports) rather than assuming a scalar.
+- **`?search_fields=` needs public names.** Because `getSearchableFields()` intersects the request's `search_fields` against `$this->searchable`, `$searchable` is kept in public names and `applySearch()` qualifies at emit time (above). If the plan instead chooses to **not** support `search_fields` on this endpoint, document it as unsupported and have `getSearchableFields()` ignore the param (return the full configured set).
+
+### Response shape
+
+```jsonc
+{ "success": true, "message": "...", "data": {
+    "items": [ { /* projected user payload: account + nested profile (or null) */ } ],
+    "pagination": { "page": 1, "per_page": 25, "total": 0, "total_pages": 0 }
+} }
+```
+
+Pagination metadata lives **outside** the per-item projection; each `items[]` entry is a projected user payload (per-item `?fields=` applied).
+
+### Components / files (Phase 2)
+
+- `routes/user-list.php` (new) — `GET /users`; loaded by `register()` only when `user_lookup.enabled && user_lookup.list.enabled`.
+- `src/Support/UsersListQueryFilter.php` (new) — public-name whitelists; `filterProfileFirstName(mixed,…)`/`filterProfileLastName(mixed,…)`; `applySearch()`/`applySort()` overrides doing public→qualified mapping + the `profiles.deleted_at IS NULL` guards; `$defaultSort = '-created_at'` (default `getSearchableFields()` kept, so `?search_fields=` intersects public-vs-public).
+- `UserController::index()` (new method) — `#[RequiresPermission('users.read')]`; clamps `page`/`per_page`; returns the `{items, pagination}` envelope.
+- `UserRepository::paginateAccountProfileRows()` (new) — the joined, explicit-column, soft-delete-scoped, paginated reader (applies the filter, clamps, paginates).
+- `ProfileResponder::buildList()` (or a thin `UserListResponder`) — resolve `users`-audience columns, run the query, reconstruct each flat row into account + nested profile, PHP-null absent/soft-deleted profiles, project each item.
+- `config/users.php` additions + README "Account read endpoints" update.
+
+### Tests (Phase 2)
+
+- **No profile** → user appears with `profile: null`.
+- **Soft-deleted profile (presence)** → user appears with `profile: null` (not dropped from a plain list).
+- **Soft-deleted profile (no leak via search)** → `?search=Jane` where the only "Jane" is in a *deleted* profile → that user is **not** returned; but if the user also matches by `username`, they appear with `profile: null` (the deleted name didn't cause the match).
+- **Soft-deleted profile (no leak via filter)** → `?filter[profile][first_name]=Jane` excludes a user whose Jane profile is soft-deleted.
+- **Soft-deleted profile (no leak via sort)** → `?sort=first_name` does not order users by a deleted profile's value (NULL sort key).
+- **Sort mapping** → `?sort=first_name` orders by `profiles.first_name`; `?sort=created_at` resolves unambiguously to `users.created_at`; default (no `?sort`) is `-created_at` (newest first).
+- **Email filter disabled by default** → `?filter[email]=…` / `?search=<email>` is a no-op; matches only when `allow_email_filter` is true.
+- **`status` not filterable by default** → `?filter[status]=…` is ignored unless the app opts it in.
+- **`page`/`per_page` clamp** → `per_page=1000` → 100; `per_page=0`/`page=0` → floored; non-numeric → defaults.
+- **Per-item field projection** → `?fields=username,profile.first_name` projects each item; disallowed fields pruned.
+- **Gating** → route absent unless both `user_lookup.enabled` and `list.enabled`; **permission** → `index()` carries `#[RequiresPermission('users.read')]`.
+- **No N+1** → a page of N users issues a single `users`+`profiles` query (no per-row profile query).
+
 ## Future work (out of scope)
 
 - **Envelope-aware `FieldSelectionMiddleware`** (project under `data{}`), which would let these routes use the declarative `#[Fields]` attribute instead of manual projection — and benefit every endpoint.
-- **`GET /users` collection** (paginated, filtered) reusing `getProfilesForUsers()`, with the same config-driven `users`-audience field resolution.
+- **Meilisearch-backed user search** — `GET /users` search is SQL `LIKE` (decoupled, no dependency on `glueful/meilisearch`). A future option is an *optional bridge* making `User` `Searchable` so users appear in the global `/api/search`; routing the list's `?search` through Meilisearch (blended SQL+engine pagination) is explicitly **not** planned.
 - **Custom `users`-table columns** via the same `account_fields` mechanism (already structurally supported; not a focus since `users` is the identity spine and `profiles` is the extensible table).
 
 ## Open questions
