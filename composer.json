@@ -12,9 +12,12 @@
         "php": "^8.3"
     },
     "require-dev": {
-        "glueful/framework": "@dev",
+        "glueful/framework": "^1.50.1",
         "phpunit/phpunit": "^10.0",
         "phpstan/phpstan": "^1.10"
+    },
+    "suggest": {
+        "glueful/email-notification": "Registers the 'email' notification channel required to deliver password-reset and email-verification messages (forgot-password sends through it)."
     },
     "autoload": {
         "psr-4": {
@@ -29,9 +32,17 @@
     "extra": {
         "glueful": {
             "name": "Users",
+            "displayName": "Users (Identity & Accounts)",
+            "description": "First-party identity store and account lifecycle for Glueful",
+            "version": "1.0.0",
+            "categories": [
+                "authentication",
+                "users"
+            ],
+            "publisher": "glueful-team",
             "provider": "Glueful\\Extensions\\Users\\UsersServiceProvider",
             "requires": {
-                "glueful": ">=1.30.0",
+                "glueful": ">=1.50.1",
                 "extensions": []
             }
         }
@@ -41,14 +52,5 @@
         "analyse": "phpstan analyse"
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../../framework",
-            "options": {
-                "symlink": true
-            }
-        }
-    ]
+    "prefer-stable": true
 }
