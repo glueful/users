@@ -1,0 +1,56 @@
+{
+    "name": "glueful/users",
+    "description": "Users: first-party identity store + account lifecycle for Glueful",
+    "type": "glueful-extension",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Glueful Team"
+        }
+    ],
+    "require": {
+        "php": "^8.3"
+    },
+    "require-dev": {
+        "glueful/framework": "^1.50.1",
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.10"
+    },
+    "suggest": {
+        "glueful/email-notification": "Registers the 'email' notification channel required to deliver password-reset and email-verification messages (forgot-password sends through it)."
+    },
+    "autoload": {
+        "psr-4": {
+            "Glueful\\Extensions\\Users\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Glueful\\Extensions\\Users\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "glueful": {
+            "name": "Users",
+            "displayName": "Users (Identity & Accounts)",
+            "description": "First-party identity store and account lifecycle for Glueful",
+            "version": "1.0.0",
+            "categories": [
+                "authentication",
+                "users"
+            ],
+            "publisher": "glueful-team",
+            "provider": "Glueful\\Extensions\\Users\\UsersServiceProvider",
+            "requires": {
+                "glueful": ">=1.50.1",
+                "extensions": []
+            }
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
