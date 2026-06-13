@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Revoke active framework sessions for the user after a successful password reset.
 - Add route-level rate limits to `POST /auth/forgot-password` and `POST /auth/reset-password`.
 - Cap failed 2FA PIN attempts per challenge and consume the challenge after repeated wrong codes.
+- Read and consume file-based OTP fallback records during OTP verification.
 
 ## [1.0.0] - 2026-06-05
 

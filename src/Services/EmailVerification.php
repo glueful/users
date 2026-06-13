@@ -376,6 +376,7 @@ class EmailVerification
     {
         $key = self::OTP_PREFIX . $this->sanitizeEmailForCacheKey($email);
         $stored = $this->cache->get($key);
+        $fromFallback = false;
 
         if (
             !is_array($stored) ||
@@ -384,10 +385,14 @@ class EmailVerification
             !isset($stored['timestamp']) ||
             $stored['timestamp'] === ''
         ) {
-            $this->incrementAttempts($email);
+            $stored = $this->readOTPAlternative($key);
+            $fromFallback = $stored !== null;
+            if ($stored === null) {
+                $this->incrementAttempts($email);
 
 
-            return false;
+                return false;
+            }
         }
 
         $isValid = OTP::verifyHashedOTP($providedOTP, $stored['otp']);
@@ -395,6 +400,9 @@ class EmailVerification
         if ($isValid) {
             // Clear rate limiting on success
             $this->cache->delete($key);
+            if ($fromFallback) {
+                $this->deleteOTPAlternative($key);
+            }
 
             if ($markEmailVerified) {
                 // Update email_verified_at timestamp if user exists
@@ -422,6 +430,52 @@ class EmailVerification
 
 
         return false;
+    }
+
+    /**
+     * @return array{otp:string,timestamp:int}|null
+     */
+    private function readOTPAlternative(string $key): ?array
+    {
+        $filePath = $this->otpAlternativePath($key);
+        if (!is_file($filePath)) {
+            return null;
+        }
+
+        $raw = file_get_contents($filePath);
+        if ($raw === false || $raw === '') {
+            return null;
+        }
+
+        try {
+            $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        if (!is_array($data) || !isset($data['otp'], $data['timestamp'], $data['expiry'])) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        if ((int) $data['expiry'] < time()) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        return [
+            'otp' => (string) $data['otp'],
+            'timestamp' => (int) $data['timestamp'],
+        ];
+    }
+
+    private function deleteOTPAlternative(string $key): void
+    {
+        $filePath = $this->otpAlternativePath($key);
+        if (is_file($filePath)) {
+            @unlink($filePath);
+        }
     }
 
     /**
@@ -689,6 +743,15 @@ class EmailVerification
         // Use base64 encoding and replace characters that might still cause issues
         // The resulting string will be URL-safe and cache-key compliant
         return str_replace(['/', '+', '='], ['_', '-', ''], base64_encode($email));
+    }
+
+    private function otpAlternativePath(string $key): string
+    {
+        $storagePath = $this->context !== null
+            ? config($this->context, 'app.paths.storage_path', __DIR__ . '/../../storage') . '/cache/'
+            : __DIR__ . '/../../storage/cache/';
+
+        return $storagePath . md5($key) . '.tmp';
     }
 
     private function passwordResetTokenKey(string $token): string
