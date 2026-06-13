@@ -37,6 +37,7 @@ final class TwoFactorServiceFactory
             (int) $cfg('auth.two_factor.pin_ttl', 300),
             (int) $cfg('auth.two_factor.disable_freshness', 300),
             (string) $cfg('auth.two_factor.template_name', 'two-factor-pin'),
+            (int) $cfg('auth.two_factor.max_pin_attempts', 5),
             (bool) $cfg('auth.two_factor.enabled', false)
         );
     }

@@ -58,6 +58,7 @@ final class TwoFactorService implements TwoFactorServiceInterface
         private int $pinTtl = 300,
         private int $disableFreshness = 300,
         private string $templateName = 'two-factor-pin',
+        private int $maxPinAttempts = 5,
         private bool $masterEnabled = true,
     ) {
     }
@@ -162,11 +163,13 @@ final class TwoFactorService implements TwoFactorServiceInterface
 
         // bcrypt verify is constant-time — no separate hash_equals needed.
         if (!OTP::verifyHashedOTP($code, (string) $pinEntry['code_hash'])) {
+            $this->recordFailedPinAttempt((string) $claims['jti'], max(1, $claims['exp'] - time()));
             throw new InvalidTwoFactorCodeException('Wrong code');
         }
 
         // Consume: delete the PIN, blocklist the jti for the rest of its lifetime.
         $this->cache->delete("2fa:pin:{$claims['jti']}");
+        $this->cache->delete("2fa:attempts:{$claims['jti']}");
         $this->blocklist->consume($claims['jti'], max(1, $claims['exp'] - time()));
 
         if ($claims['purpose'] === ChallengeTokenIssuer::PURPOSE_ENABLE) {
@@ -240,6 +243,19 @@ final class TwoFactorService implements TwoFactorServiceInterface
             return false;
         }
         return $this->cache->has("2fa:fresh:{$sid}");
+    }
+
+    private function recordFailedPinAttempt(string $jti, int $ttl): void
+    {
+        $attemptKey = "2fa:attempts:{$jti}";
+        $attempts = (int) ($this->cache->get($attemptKey) ?? 0) + 1;
+        $this->cache->set($attemptKey, $attempts, $ttl);
+
+        if ($attempts >= $this->maxPinAttempts) {
+            $this->cache->delete("2fa:pin:{$jti}");
+            $this->cache->delete($attemptKey);
+            $this->blocklist->consume($jti, $ttl);
+        }
     }
 
     public function disable(string $userUuid, ?string $sid = null): void
