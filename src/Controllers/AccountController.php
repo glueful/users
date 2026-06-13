@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Glueful\Extensions\Users\Controllers;
 
 use Glueful\Bootstrap\ApplicationContext;
+use Glueful\Auth\Interfaces\SessionStoreInterface;
 use Glueful\Http\Response;
 use Glueful\Helpers\RequestHelper;
 use Glueful\Auth\PasswordHasher;
@@ -160,6 +161,7 @@ final class AccountController
         if (!$success) {
             throw new AuthenticationException('Failed to update password');
         }
+        $this->revokeUserSessions($reset['user_uuid']);
 
         return Response::success([
             'updated_at' => date('Y-m-d\TH:i:s\Z')
@@ -169,5 +171,20 @@ final class AccountController
     private function userExists(string $email): bool
     {
         return is_array($this->users->findByEmail($email));
+    }
+
+    private function revokeUserSessions(string $userUuid): void
+    {
+        try {
+            if (!$this->context->hasContainer() || !$this->context->getContainer()->has(SessionStoreInterface::class)) {
+                return;
+            }
+
+            /** @var SessionStoreInterface $sessionStore */
+            $sessionStore = $this->context->getContainer()->get(SessionStoreInterface::class);
+            $sessionStore->revokeAllForUser($userUuid);
+        } catch (\Throwable $e) {
+            error_log('Failed to revoke sessions after password reset: ' . $e->getMessage());
+        }
     }
 }

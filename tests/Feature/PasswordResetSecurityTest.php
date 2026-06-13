@@ -81,6 +81,32 @@ final class PasswordResetSecurityTest extends AppTestCase
         ]));
     }
 
+    public function testPasswordResetRevokesActiveSessionsForUser(): void
+    {
+        $this->seedUserWithPassword('u-reset', 'victim@example.com', 'victim', 'old-secret');
+        $this->createAuthSessionsTable();
+        $this->db()->table('auth_sessions')->insert([
+            'uuid' => 'sess-reset',
+            'user_uuid' => 'u-reset',
+            'expires_at' => date('Y-m-d H:i:s', time() + 3600),
+            'status' => 'active',
+            'provider' => 'jwt',
+            'remember_me' => 0,
+        ]);
+        $resetToken = $this->issueResetToken('victim@example.com', '123456');
+
+        $controller = new AccountController($this->context);
+        $controller->resetPassword($this->jsonRequest([
+            'reset_token' => $resetToken,
+            'password' => 'new-secret',
+        ]));
+
+        $session = $this->db()->table('auth_sessions')->where('uuid', '=', 'sess-reset')->first();
+        self::assertIsArray($session);
+        self::assertSame('revoked', $session['status']);
+        self::assertNotEmpty($session['revoked_at']);
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -101,6 +127,41 @@ final class PasswordResetSecurityTest extends AppTestCase
             'status' => 'active',
             'two_factor_enabled' => 0,
         ]);
+    }
+
+    private function issueResetToken(string $email, string $otp): string
+    {
+        $this->cache()->set('email_verification:' . $this->cacheEmail($email), [
+            'otp' => OTP::hashOTP($otp),
+            'timestamp' => time(),
+        ], 900);
+
+        $verifier = new EmailVerification(context: $this->context, cache: $this->cache());
+        $reset = $verifier->verifyPasswordResetOTP($email, $otp);
+        self::assertIsArray($reset);
+        return $reset['reset_token'];
+    }
+
+    private function createAuthSessionsTable(): void
+    {
+        $this->db()->getPDO()->exec(
+            'CREATE TABLE auth_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid VARCHAR(12) UNIQUE,
+                user_uuid VARCHAR(12),
+                ip_address VARCHAR(45) NULL,
+                user_agent TEXT NULL,
+                last_seen_at TIMESTAMP NULL,
+                expires_at TIMESTAMP NOT NULL,
+                revoked_at TIMESTAMP NULL,
+                session_version INTEGER DEFAULT 1,
+                status VARCHAR(20) DEFAULT "active",
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                provider TEXT DEFAULT "jwt",
+                remember_me INTEGER DEFAULT 0
+            )'
+        );
     }
 
     private function cache(): CacheStore
