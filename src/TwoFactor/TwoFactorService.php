@@ -59,7 +59,7 @@ final class TwoFactorService implements TwoFactorServiceInterface
         private int $disableFreshness = 300,
         private string $templateName = 'two-factor-pin',
         private int $maxPinAttempts = 5,
-        private bool $masterEnabled = true,
+        private bool $masterEnabled = false,
     ) {
     }
 

@@ -107,6 +107,14 @@ final class ProviderWiringTest extends AppTestCase
         self::assertContains('users.read', $slugs);
     }
 
+    public function test_two_factor_routes_follow_auth_config_gate(): void
+    {
+        $this->bootApp(['auth.php' => "['two_factor'=>['enabled'=>true]]"]);
+        $router = $this->registerProvider();
+
+        self::assertNotNull($router->match(Request::create('/2fa/enable', 'POST')));
+    }
+
     public function test_show_method_carries_requires_permission(): void
     {
         $rm = new \ReflectionMethod(\Glueful\Extensions\Users\Controllers\UserController::class, 'show');
