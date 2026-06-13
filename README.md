@@ -14,8 +14,8 @@ Glueful core is provider-agnostic and ships **no** user store of its own. It aut
 - **Account store**: `users` + `profiles` tables with UUID principals, soft-deletes, and unique constraints
 - **Extensible from your app**: add custom profile columns, enrich the login response, or contribute identity claims without forking the extension (see [Extending Users](#extending-users))
 - **Email verification / OTP**: send, verify, and resend one-time codes
-- **Password reset**: forgot-password → reset-password via emailed code
-- **Email-PIN two-factor authentication**: enroll, verify, and disable 2FA behind core's `TwoFactorServiceInterface` (opt-in via `TWO_FACTOR_ENABLED`)
+- **Password reset**: forgot-password -> verify OTP with `purpose=password_reset` -> reset-password with a single-use reset token
+- **Email-PIN two-factor authentication**: enroll, verify, and disable 2FA behind core's `TwoFactorServiceInterface` (opt-in via `auth.two_factor.enabled`)
 - **SSO provisioning helpers**: `findOrCreateFromSaml()` / `findOrCreateFromLdap()` on the repository
 - **Ordered migrations**: schema runs at `IDENTITY` priority (before app/dependent extensions), source-tracked as `glueful/users`
 - **Admin CLI**: password reset and 2FA management commands
@@ -235,35 +235,28 @@ This extension has no config file of its own; it reads a small set of core confi
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `auth.two_factor.enabled` | `false` | Service-level enable flag |
+| `auth.two_factor.enabled` | `false` | Master switch for the 2FA service and `/2fa/*` route registration |
 | `auth.two_factor.pin_length` | `6` | Emailed PIN length |
 | `auth.two_factor.pin_ttl` | `300` | PIN / challenge lifetime (seconds) |
 | `auth.two_factor.disable_freshness` | `300` | How recently 2FA must have been verified to disable it (seconds) |
 | `auth.two_factor.template_name` | `two-factor-pin` | Notification template for the PIN email |
+| `auth.two_factor.max_pin_attempts` | `5` | Wrong PIN attempts allowed per challenge before the challenge is consumed |
 
-**Environment**
-
-```env
-# Master switch for the /2fa/* routes. When false (default), 2fa.php early-returns
-# and the /2fa/* endpoints do not exist (404). Cast to a real boolean by env().
-TWO_FACTOR_ENABLED=false
-```
-
-> Note: `TWO_FACTOR_ENABLED` gates whether the **routes** are registered; `auth.two_factor.enabled` gates the **service**. Enable both to use email-PIN 2FA over HTTP.
+When `auth.two_factor.enabled` is false (default), the `/2fa/*` routes are not registered and the service fails closed.
 
 ## API Endpoints
 
 ### Account lifecycle (prefix `/auth`)
 
 - `POST /auth/verify-email` – Send an email-verification OTP
-- `POST /auth/verify-otp` – Verify an emailed OTP (rate-limited 3/min)
+- `POST /auth/verify-otp` – Verify an emailed OTP (rate-limited 3/min). Use `purpose=password_reset` to receive a short-lived `reset_token`.
 - `POST /auth/resend-otp` – Resend an OTP (rate-limited 2 / 2 min)
 - `POST /auth/forgot-password` – Begin password reset (emails a code)
-- `POST /auth/reset-password` – Complete password reset with the code
+- `POST /auth/reset-password` – Complete password reset with the single-use `reset_token`
 
 > Login (`POST /auth/login`), logout, refresh, and session validation are **core** endpoints. This extension supplies the user store they authenticate against, not the login route itself.
 
-### Two-factor authentication (prefix `/2fa`, only when `TWO_FACTOR_ENABLED=true`)
+### Two-factor authentication (prefix `/2fa`, only when `auth.two_factor.enabled=true`)
 
 - `POST /2fa/enable` – Begin enrollment: emails a PIN, returns a short-lived `challenge_token` (auth required, rate-limited)
 - `POST /2fa/verify` – Verify a PIN against a `challenge_token`. For a **login** challenge it completes login and returns the full session (identical to `POST /auth/login`); for an **enrollment** challenge it returns `{success, message}`

@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-party **user store** (`users` + `profiles` tables, migrated at `IDENTITY` priority) and `UserRepository`.
 - **Identity seam** — `UserProvider` adapts the store to the core `UserProviderInterface` (aliased so core auth resolves it).
 - **Account lifecycle endpoints** (`/auth` prefix) — email verification (OTP) and password recovery (forgot/reset), extracted from core `AuthController`.
-- **Email-PIN two-factor authentication** (`/2fa`, enabled via `TWO_FACTOR_ENABLED`) — `enable`/`verify`/`disable`, backed by `TwoFactorService` implementing the core `TwoFactorServiceInterface`, plus `twofactor:*` CLI commands.
+- **Email-PIN two-factor authentication** (`/2fa`, enabled via `auth.two_factor.enabled`) — `enable`/`verify`/`disable`, backed by `TwoFactorService` implementing the core `TwoFactorServiceInterface`, plus `twofactor:*` CLI commands.
 
 ### Notes
 
