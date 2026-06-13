@@ -69,6 +69,20 @@ final class ProviderWiringTest extends AppTestCase
         );
     }
 
+    public function test_password_reset_routes_are_rate_limited(): void
+    {
+        $this->bootApp();
+        $router = $this->loadRouteFile('/routes/account.php');
+
+        foreach (['/auth/forgot-password', '/auth/reset-password'] as $path) {
+            $match = $router->match(Request::create($path, 'POST'));
+            self::assertIsArray($match, $path . ' registered');
+            $route = $match['route'];
+            self::assertContains('rate_limit', $route->getMiddleware(), $path . ' has rate_limit middleware');
+            self::assertNotSame([], $route->getRateLimitConfig(), $path . ' has builder rate limit config');
+        }
+    }
+
     public function test_register_gates_lookup_off_by_default(): void
     {
         // Absence is order-independent: a freshly-booted router only ever matches /users if THIS

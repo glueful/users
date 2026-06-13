@@ -92,7 +92,9 @@ $router->group(['prefix' => '/auth'], function (Router $router) {
      * @response 404 "Email not found"
      * @response 400 "Invalid email format"
      */
-    $router->post('/forgot-password', [AccountController::class, 'forgotPassword']);
+    $router->post('/forgot-password', [AccountController::class, 'forgotPassword'])
+        ->rateLimit(3, 15)
+        ->middleware('rate_limit');
 
     /**
      * @route POST /auth/reset-password
@@ -112,5 +114,7 @@ $router->group(['prefix' => '/auth'], function (Router $router) {
      * @response 400 "Invalid password format"
      * @response 404 "Email not found"
      */
-    $router->post('/reset-password', [AccountController::class, 'resetPassword']);
+    $router->post('/reset-password', [AccountController::class, 'resetPassword'])
+        ->rateLimit(5, 15)
+        ->middleware('rate_limit');
 });
