@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add route-level rate limits to `POST /auth/forgot-password` and `POST /auth/reset-password`.
 - Cap failed 2FA PIN attempts per challenge and consume the challenge after repeated wrong codes.
 - Read and consume file-based OTP fallback records during OTP verification.
+- Hard-deny additional sensitive account fields (`two_factor_secret`, `remember_token`, `provider_id`) from profile projection.
 
 ## [1.0.0] - 2026-06-05
 

@@ -10,7 +10,7 @@ namespace Glueful\Extensions\Users\Support;
  */
 final class ProfileFieldResolver
 {
-    private const ACCOUNT_DENYLIST = ['password', 'deleted_at'];
+    private const ACCOUNT_DENYLIST = ['password', 'deleted_at', 'two_factor_secret', 'remember_token', 'provider_id'];
     private const PROFILE_DENYLIST = ['user_uuid', 'deleted_at'];
 
     /**

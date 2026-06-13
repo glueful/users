@@ -11,7 +11,20 @@ final class ProfileFieldResolverTest extends TestCase
 {
     private ProfileFieldResolver $resolver;
     /** @var list<string> */
-    private array $usersCols = ['id', 'uuid', 'username', 'email', 'password', 'status', 'created_at', 'updated_at', 'deleted_at'];
+    private array $usersCols = [
+        'id',
+        'uuid',
+        'username',
+        'email',
+        'password',
+        'status',
+        'created_at',
+        'updated_at',
+        'deleted_at',
+        'two_factor_secret',
+        'remember_token',
+        'provider_id',
+    ];
     /** @var list<string> */
     private array $profilesCols = ['uuid', 'user_uuid', 'first_name', 'last_name', 'photo_url', 'photo_uuid', 'status', 'deleted_at'];
 
@@ -37,6 +50,17 @@ final class ProfileFieldResolverTest extends TestCase
     {
         $r = $this->resolver->resolve(['account' => ['uuid', 'deleted_at'], 'profile' => []], $this->usersCols, $this->profilesCols);
         self::assertNotContains('deleted_at', $r['account']);
+    }
+
+    public function test_account_denylist_includes_secret_and_provider_fields(): void
+    {
+        $r = $this->resolver->resolve(
+            ['account' => ['uuid', 'two_factor_secret', 'remember_token', 'provider_id'], 'profile' => []],
+            $this->usersCols,
+            $this->profilesCols
+        );
+
+        self::assertSame(['uuid'], $r['account']);
     }
 
     public function test_profile_denylist_strips_user_uuid_and_deleted_at(): void
