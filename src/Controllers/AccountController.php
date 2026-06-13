@@ -176,12 +176,19 @@ final class AccountController
     private function revokeUserSessions(string $userUuid): void
     {
         try {
-            if (!$this->context->hasContainer() || !$this->context->getContainer()->has(SessionStoreInterface::class)) {
+            if (!$this->context->hasContainer()) {
+                error_log('Skipped session revocation after password reset: container unavailable');
+                return;
+            }
+
+            $container = $this->context->getContainer();
+            if (!$container->has(SessionStoreInterface::class)) {
+                error_log('Skipped session revocation after password reset: SessionStoreInterface is not bound');
                 return;
             }
 
             /** @var SessionStoreInterface $sessionStore */
-            $sessionStore = $this->context->getContainer()->get(SessionStoreInterface::class);
+            $sessionStore = $container->get(SessionStoreInterface::class);
             $sessionStore->revokeAllForUser($userUuid);
         } catch (\Throwable $e) {
             error_log('Failed to revoke sessions after password reset: ' . $e->getMessage());

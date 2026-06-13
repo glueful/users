@@ -36,6 +36,9 @@ class EmailVerification
     /** @var string Cache prefix for verified password-reset grants */
     private const PASSWORD_RESET_TOKEN_PREFIX = 'password_reset:';
 
+    /** @var string Cache prefix for consumed password-reset grants */
+    private const PASSWORD_RESET_CONSUMED_PREFIX = 'password_reset_consumed:';
+
     /** @var int Password-reset token validity period in seconds */
     public const PASSWORD_RESET_TOKEN_TTL = 900;
 
@@ -519,6 +522,10 @@ class EmailVerification
             return null;
         }
 
+        if (!$this->cache->setNx($this->passwordResetConsumedKey($token), '1', self::PASSWORD_RESET_TOKEN_TTL)) {
+            return null;
+        }
+
         $key = $this->passwordResetTokenKey($token);
         $stored = $this->cache->get($key);
         $this->cache->delete($key);
@@ -757,5 +764,10 @@ class EmailVerification
     private function passwordResetTokenKey(string $token): string
     {
         return self::PASSWORD_RESET_TOKEN_PREFIX . hash('sha256', $token);
+    }
+
+    private function passwordResetConsumedKey(string $token): string
+    {
+        return self::PASSWORD_RESET_CONSUMED_PREFIX . hash('sha256', $token);
     }
 }

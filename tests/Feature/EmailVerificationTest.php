@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Glueful\Extensions\Users\Tests\Feature;
 
+use Glueful\Cache\Drivers\ArrayCacheDriver;
 use Glueful\Extensions\Users\Repositories\UserRepository;
 use Glueful\Extensions\Users\Services\EmailVerification;
 use Glueful\Extensions\Users\Tests\Support\AppTestCase;
@@ -39,6 +40,38 @@ final class EmailVerificationTest extends AppTestCase
 
         self::assertTrue($verifier->verifyOTP('jane@example.com', '123456'));
         self::assertFileDoesNotExist($file);
+    }
+
+    public function testPasswordResetTokenConsumeStopsWhenConsumedMarkerExists(): void
+    {
+        $token = str_repeat('a', 64);
+        $cache = new class extends ArrayCacheDriver {
+            public int $getCalls = 0;
+            public int $deleteCalls = 0;
+
+            public function setNx(string $key, mixed $value, int $ttl = 3600): bool
+            {
+                return false;
+            }
+
+            public function get(string $key, mixed $default = null): mixed
+            {
+                $this->getCalls++;
+                return parent::get($key, $default);
+            }
+
+            public function delete(string $key): bool
+            {
+                $this->deleteCalls++;
+                return parent::delete($key);
+            }
+        };
+
+        $verifier = new EmailVerification(cache: $cache, context: $this->context);
+
+        self::assertNull($verifier->consumePasswordResetToken($token));
+        self::assertSame(0, $cache->getCalls);
+        self::assertSame(0, $cache->deleteCalls);
     }
 
     private function cacheEmail(string $email): string
