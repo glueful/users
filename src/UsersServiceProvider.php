@@ -60,7 +60,9 @@ final class UsersServiceProvider extends ServiceProvider
         $this->mergeConfig('users', require __DIR__ . '/../config/users.php');
 
         $this->loadRoutesFrom(__DIR__ . '/../routes/account.php');
-        $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
+        if ((bool) config($context, 'auth.two_factor.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
+        }
         $this->loadRoutesFrom(__DIR__ . '/../routes/users.php');
 
         if ((bool) config($context, 'users.user_lookup.enabled', false)) {

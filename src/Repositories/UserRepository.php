@@ -487,72 +487,26 @@ class UserRepository extends BaseRepository
      */
     public function findOrCreateFromSaml(array $userData): ?array
     {
-        // Email is required to identify the user
         if (($userData['email'] ?? '') === '') {
             return null;
         }
 
         return $this->executeInTransaction(function () use ($userData) {
-            // Try to find the user by email
             $user = $this->findByEmail($userData['email']);
 
-            // If user exists, update SAML-related fields
             if ($user !== null) {
-                // Update user with SAML information if needed
-                $updates = [
-                    'last_login_at' => date('Y-m-d H:i:s'),
-                    'provider' => 'saml',
-                    'provider_id' => $userData['saml_idp'] ?? null
-                ];
-
-                // Optionally update name if provided
-                if (($userData['name'] ?? '') !== '') {
-                    $updates['name'] = $userData['name'];
-                }
-
-                // Optionally update first/last name if provided
-                if (($userData['first_name'] ?? '') !== '') {
-                    $updates['first_name'] = $userData['first_name'];
-                }
-
-                if (($userData['last_name'] ?? '') !== '') {
-                    $updates['last_name'] = $userData['last_name'];
-                }
-
-                $this->update($user['uuid'], $updates);
-
-                // Reload the user to get updated data
+                $this->update($user['uuid'], ['email_verified_at' => date('Y-m-d H:i:s')]);
+                $this->upsertProfileNames((string) $user['uuid'], $userData);
                 return $this->findByUuid($user['uuid']);
             }
 
-            // User doesn't exist, create a new one
-            $newUser = [
-                'uuid' => \Glueful\Helpers\Utils::generateNanoID(),
-                'email' => $userData['email'],
-                'name' => $userData['name'] ?? explode('@', $userData['email'])[0],
-                'first_name' => $userData['first_name'] ?? null,
-                'last_name' => $userData['last_name'] ?? null,
-                'password' => password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), // Random password
-                'provider' => 'saml',
-                'provider_id' => $userData['saml_idp'] ?? null,
-                'email_verified_at' => date('Y-m-d H:i:s'), // SAML users are pre-verified
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-                'last_login_at' => date('Y-m-d H:i:s')
-            ];
-
-            // Create the new user using the parent create method
-            // This will also handle the audit logging
-            $userId = $this->create($newUser);
-            if ($userId === '') {
+            $uuid = $this->createExternalProviderUser($userData);
+            if ($uuid === '') {
                 throw new DatabaseException('Failed to create user');
             }
+            $this->upsertProfileNames($uuid, $userData);
 
-            // Note: Role assignment moved to RBAC extension
-            // Use RBAC extension APIs for default role assignment
-
-            // Return the newly created user
-            return $this->findByUuid($newUser['uuid']);
+            return $this->findByUuid($uuid);
         });
     }
 
@@ -607,95 +561,100 @@ class UserRepository extends BaseRepository
     public function findOrCreateFromLdap(array $userData): ?array
     {
         try {
-            // Email is required to identify the user
             if (($userData['email'] ?? '') === '') {
                 return null;
             }
 
-            // Try to find the user by email
-            $user = $this->findByEmail($userData['email']);
+            return $this->executeInTransaction(function () use ($userData) {
+                $user = $this->findByEmail($userData['email']);
 
-            // If user exists, update LDAP-related fields
-            if ($user !== null) {
-                // Update user with LDAP information
-                $updates = [
-                    'last_login_at' => date('Y-m-d H:i:s'),
-                    'provider' => 'ldap',
-                    'provider_id' => $userData['ldap_server'] ?? null
-                ];
-
-                // Update name if provided
-                if (($userData['name'] ?? '') !== '') {
-                    $updates['name'] = $userData['name'];
+                if ($user !== null) {
+                    $this->update($user['uuid'], ['email_verified_at' => date('Y-m-d H:i:s')]);
+                    $this->upsertProfileNames((string) $user['uuid'], $userData);
+                    return $this->findByUuid($user['uuid']);
                 }
 
-                // Update first/last name if provided
-                if (($userData['first_name'] ?? '') !== '') {
-                    $updates['first_name'] = $userData['first_name'];
-                }
+                $uuid = $this->createExternalProviderUser($userData);
+                $this->upsertProfileNames($uuid, $userData);
 
-                if (($userData['last_name'] ?? '') !== '') {
-                    $updates['last_name'] = $userData['last_name'];
-                }
-
-                // Update additional fields if they exist
-                foreach (['phone', 'title', 'department', 'company', 'employee_id'] as $field) {
-                    if (($userData[$field] ?? '') !== '') {
-                        $updates[$field] = $userData[$field];
-                    }
-                }
-
-                $this->update($user['uuid'], $updates);
-
-                // Reload the user to get updated data
-                $user = $this->findByUuid($user['uuid']);
-
-                // Note: Role synchronization moved to RBAC extension
-                // Use RBAC extension APIs for role assignment
-
-                return $user;
-            }
-
-            // User doesn't exist, create a new one
-            $newUser = [
-                'uuid' => \Glueful\Helpers\Utils::generateNanoID(),
-                'email' => $userData['email'],
-                'name' => $userData['name'] ?? explode('@', $userData['email'])[0],
-                'first_name' => $userData['first_name'] ?? null,
-                'last_name' => $userData['last_name'] ?? null,
-                'phone' => $userData['phone'] ?? null,
-                'title' => $userData['title'] ?? null,
-                'department' => $userData['department'] ?? null,
-                'company' => $userData['company'] ?? null,
-                'employee_id' => $userData['employee_id'] ?? null,
-                'password' => password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), // Random password
-                'provider' => 'ldap',
-                'provider_id' => $userData['ldap_server'] ?? null,
-                'status' => 'active',
-                'email_verified_at' => date('Y-m-d H:i:s'), // LDAP users are pre-verified
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-                'last_login_at' => date('Y-m-d H:i:s')
-            ];
-
-            // Create the new user using fluent interface
-            $this->db->table('users')->insert(array_filter($newUser, function ($value) {
-                return $value !== null;
-            }));
-
-            // Note: Role assignment moved to RBAC extension
-            // Use RBAC extension APIs for default role assignment
-
-            // Return the newly created user with roles
-            $user = $this->findByUuid($newUser['uuid']);
-            $user['roles'] = []; // Roles managed by RBAC extension
-
-            return $user;
+                return $this->findByUuid($uuid);
+            });
         } catch (\Throwable $e) {
             // Log the error
             error_log('Error in findOrCreateFromLdap: ' . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * @param array<string, mixed> $userData
+     */
+    private function createExternalProviderUser(array $userData): string
+    {
+        $email = (string) $userData['email'];
+
+        return $this->create([
+            'username' => $this->uniqueUsernameFromEmail($email),
+            'email' => $email,
+            'password' => password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT),
+            'status' => 'active',
+            'email_verified_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $userData
+     */
+    private function upsertProfileNames(string $userUuid, array $userData): void
+    {
+        $firstName = (string) ($userData['first_name'] ?? '');
+        $lastName = (string) ($userData['last_name'] ?? '');
+        if ($firstName === '' && $lastName === '') {
+            return;
+        }
+
+        $existing = $this->db->table('profiles')
+            ->select(['uuid'])
+            ->where(['user_uuid' => $userUuid])
+            ->limit(1)
+            ->get();
+
+        $data = [];
+        if ($firstName !== '') {
+            $data['first_name'] = $firstName;
+        }
+        if ($lastName !== '') {
+            $data['last_name'] = $lastName;
+        }
+
+        if ($existing !== []) {
+            $this->db->table('profiles')->where(['user_uuid' => $userUuid])->update($data);
+            return;
+        }
+
+        $this->db->table('profiles')->insert(array_merge([
+            'uuid' => \Glueful\Helpers\Utils::generateNanoID(),
+            'user_uuid' => $userUuid,
+            'status' => 'active',
+        ], $data));
+    }
+
+    private function uniqueUsernameFromEmail(string $email): string
+    {
+        $base = strtolower((string) preg_replace('/[^a-zA-Z0-9._-]/', '_', explode('@', $email)[0] ?: 'user'));
+        $base = trim($base, '._-');
+        if ($base === '') {
+            $base = 'user';
+        }
+
+        $candidate = $base;
+        $suffix = 1;
+        while ($this->usernameExists($candidate)) {
+            $candidate = $base . $suffix;
+            $suffix++;
+        }
+
+        return $candidate;
     }
 
     /**

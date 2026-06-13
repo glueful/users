@@ -3,18 +3,13 @@
 /**
  * glueful/users email-PIN 2FA routes — loaded via UsersServiceProvider::register().
  *
- * Registered only when TWO_FACTOR_ENABLED=true; otherwise this file early-returns and
- * /2fa/* routes do not exist (404).
+ * Loaded by UsersServiceProvider::register() only when config('auth.two_factor.enabled')
+ * is true; otherwise /2fa/* routes do not exist (404).
  *
  * @var \Glueful\Routing\Router $router
  */
 
 use Glueful\Extensions\Users\Controllers\TwoFactorController;
-
-// Master switch — env() casts 'true'/'false' to real booleans.
-if (env('TWO_FACTOR_ENABLED', false) !== true) {
-    return;
-}
 
 /**
  * @route POST /2fa/enable

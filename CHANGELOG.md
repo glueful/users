@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-13
+
+### Fixed
+
+- Require a purpose-bound, single-use reset token for `POST /auth/reset-password`; `POST /auth/verify-otp` now returns that token when called with `purpose=password_reset`, closing the email-only password reset takeover path.
+- Revoke active framework sessions for the user after a successful password reset.
+- Add route-level rate limits to `POST /auth/forgot-password` and `POST /auth/reset-password`.
+- Cap failed 2FA PIN attempts per challenge and consume the challenge after repeated wrong codes.
+- Read and consume file-based OTP fallback records during OTP verification.
+- Guard password reset token consumption with an atomic consumed marker and log when session revocation cannot run because the session store is not bound.
+- Hard-deny additional sensitive account fields (`two_factor_secret`, `remember_token`, `provider_id`) from profile projection.
+- Align 2FA route registration and service defaults on `auth.two_factor.enabled`.
+- Keep SAML/LDAP provisioning writes within the canonical `users` and `profiles` schemas.
+
 ## [1.0.0] - 2026-06-05
 
 ### Added
@@ -32,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-party **user store** (`users` + `profiles` tables, migrated at `IDENTITY` priority) and `UserRepository`.
 - **Identity seam** — `UserProvider` adapts the store to the core `UserProviderInterface` (aliased so core auth resolves it).
 - **Account lifecycle endpoints** (`/auth` prefix) — email verification (OTP) and password recovery (forgot/reset), extracted from core `AuthController`.
-- **Email-PIN two-factor authentication** (`/2fa`, enabled via `TWO_FACTOR_ENABLED`) — `enable`/`verify`/`disable`, backed by `TwoFactorService` implementing the core `TwoFactorServiceInterface`, plus `twofactor:*` CLI commands.
+- **Email-PIN two-factor authentication** (`/2fa`, enabled via `auth.two_factor.enabled`) — `enable`/`verify`/`disable`, backed by `TwoFactorService` implementing the core `TwoFactorServiceInterface`, plus `twofactor:*` CLI commands.
 
 ### Notes
 

@@ -117,6 +117,7 @@ final class TwoFactorServiceTest extends TestCase
             300,
             300,
             'two-factor-pin',
+            5,
             $masterEnabled
         );
     }
@@ -252,6 +253,27 @@ final class TwoFactorServiceTest extends TestCase
         // PIN entry still present → retry with correct PIN succeeds.
         $result = $svc->verify($begin['token'], $correct);
         $this->assertSame('login', $result['purpose']);
+    }
+
+    public function testWrongPinAttemptCapConsumesChallenge(): void
+    {
+        $svc = $this->makeService();
+        $this->seedUser('u-cap', 'user@example.com', true);
+        $begin = $svc->beginLogin(['uuid' => 'u-cap', 'email' => 'user@example.com', 'status' => 'active'], 'jwt');
+        $correct = $this->lastPin();
+        $wrong = $correct === '000000' ? '111111' : '000000';
+
+        for ($i = 0; $i < 5; $i++) {
+            try {
+                $svc->verify($begin['token'], $wrong);
+                $this->fail('Expected InvalidTwoFactorCodeException');
+            } catch (InvalidTwoFactorCodeException) {
+                // expected
+            }
+        }
+
+        $this->expectException(InvalidChallengeTokenException::class);
+        $svc->verify($begin['token'], $correct);
     }
 
     public function testReplayOfConsumedChallengeIsRejected(): void

@@ -73,6 +73,26 @@ final class UserProviderTest extends TestCase
         self::assertNull($provider->findByUuid('does-not-exist'));
     }
 
+    public function test_soft_deleted_user_cannot_authenticate(): void
+    {
+        $this->seedUser();
+        $connection = $this->app->getContainer()->get('database');
+        $connection->getPDO()->exec("UPDATE users SET deleted_at = '2026-06-13 00:00:00' WHERE email = 'amy@x.test'");
+        $row = $connection->getPDO()
+            ->query("SELECT uuid, deleted_at FROM users WHERE email = 'amy@x.test' LIMIT 1")
+            ->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        self::assertSame('2026-06-13 00:00:00', $row['deleted_at']);
+        $uuid = (string) $row['uuid'];
+
+        $provider = new UserProvider(new UserRepository());
+
+        self::assertNull($provider->findByUuid($uuid));
+        self::assertNull($provider->findByLogin('amy@x.test'));
+        self::assertNull($provider->findByLogin('amy'));
+        self::assertNull($provider->verifyCredentials('amy@x.test', 'secret-123'));
+    }
+
     private function bootFramework(): void
     {
         $this->appPath = sys_get_temp_dir() . '/glueful-userprov-' . uniqid();

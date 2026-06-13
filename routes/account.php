@@ -32,16 +32,21 @@ $router->group(['prefix' => '/auth'], function (Router $router) {
     /**
      * @route POST /auth/verify-otp
      * @summary Verify OTP
-     * @description Verifies the one-time password (OTP) sent to a user's email
+     * @description Verifies the one-time password (OTP) sent to a user's email. When
+     *   purpose=password_reset, returns a short-lived reset_token to submit to
+     *   POST /auth/reset-password.
      * @tag Authentication
-     * @requestBody email:string="Email address" otp:string="One-time password code" {required=email,otp}
+     * @requestBody email:string="Email address" otp:string="One-time password code" purpose:string="Optional purpose; use password_reset for reset flow" {required=email,otp}
      * @response 200 application/json "OTP verified successfully" {
      *   success:boolean="true",
      *   message:string="Success message",
      *   data:{
      *     email:string="Email address",
      *     verified:boolean="true",
-     *     verified_at:string="Verification timestamp"
+     *     verified_at:string="Verification timestamp",
+     *     purpose:string="password_reset when verifying a reset OTP",
+     *     reset_token:string="Single-use reset token when purpose=password_reset",
+     *     expires_in:integer="Reset token expiration time in seconds"
      *   },
      * }
      * @response 400 "Invalid OTP"
@@ -87,14 +92,17 @@ $router->group(['prefix' => '/auth'], function (Router $router) {
      * @response 404 "Email not found"
      * @response 400 "Invalid email format"
      */
-    $router->post('/forgot-password', [AccountController::class, 'forgotPassword']);
+    $router->post('/forgot-password', [AccountController::class, 'forgotPassword'])
+        ->rateLimit(3, 15)
+        ->middleware('rate_limit');
 
     /**
      * @route POST /auth/reset-password
      * @summary Reset Password
-     * @description Resets the user's password using the verification code
+     * @description Resets the user's password using the single-use reset_token returned
+     *   by POST /auth/verify-otp with purpose=password_reset.
      * @tag Authentication
-     * @requestBody email:string="Email address" password:string="New password" {required=email,password}
+     * @requestBody reset_token:string="Single-use reset token" password:string="New password" {required=reset_token,password}
      * @response 200 application/json "Password has been reset successfully" {
      *   success:boolean="true",
      *   message:string="Success message",
@@ -106,5 +114,7 @@ $router->group(['prefix' => '/auth'], function (Router $router) {
      * @response 400 "Invalid password format"
      * @response 404 "Email not found"
      */
-    $router->post('/reset-password', [AccountController::class, 'resetPassword']);
+    $router->post('/reset-password', [AccountController::class, 'resetPassword'])
+        ->rateLimit(5, 15)
+        ->middleware('rate_limit');
 });

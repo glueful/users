@@ -33,6 +33,15 @@ class EmailVerification
     /** @var string Cache prefix for failed attempts */
     private const ATTEMPTS_PREFIX = 'email_verification_attempts:';
 
+    /** @var string Cache prefix for verified password-reset grants */
+    private const PASSWORD_RESET_TOKEN_PREFIX = 'password_reset:';
+
+    /** @var string Cache prefix for consumed password-reset grants */
+    private const PASSWORD_RESET_CONSUMED_PREFIX = 'password_reset_consumed:';
+
+    /** @var int Password-reset token validity period in seconds */
+    public const PASSWORD_RESET_TOKEN_TTL = 900;
+
     /** @var int Maximum failed attempts before blocking */
     private const MAX_ATTEMPTS = 3;
 
@@ -78,13 +87,22 @@ class EmailVerification
                 . 'Provide it directly or ensure ApplicationContext has a booted container.'
             );
         }
-        $this->cache = $cache ?? CacheHelper::createCacheInstance();
-
-        if ($this->cache === null) {
-            throw new \RuntimeException(
-                'Cache is required for EmailVerification. Please ensure cache is properly configured.'
-            );
+        if ($cache !== null) {
+            $this->cache = $cache;
+        } elseif ($context !== null && $context->hasContainer() && $context->getContainer()->has(CacheStore::class)) {
+            /** @var CacheStore<mixed> $containerCache */
+            $containerCache = $context->getContainer()->get(CacheStore::class);
+            $this->cache = $containerCache;
+        } else {
+            $createdCache = CacheHelper::createCacheInstance($context);
+            if ($createdCache === null) {
+                throw new \RuntimeException(
+                    'Cache is required for EmailVerification. Please ensure cache is properly configured.'
+                );
+            }
+            $this->cache = $createdCache;
         }
+
 
         // Prefer DI-provided dispatcher/channel manager; fall back to ad-hoc instances
         $dispatcher = null;
@@ -357,10 +375,11 @@ class EmailVerification
      * @param string $providedOTP OTP to verify
      * @return bool True if OTP is valid
      */
-    public function verifyOTP(string $email, string $providedOTP): bool
+    public function verifyOTP(string $email, string $providedOTP, bool $markEmailVerified = true): bool
     {
         $key = self::OTP_PREFIX . $this->sanitizeEmailForCacheKey($email);
         $stored = $this->cache->get($key);
+        $fromFallback = false;
 
         if (
             !is_array($stored) ||
@@ -369,10 +388,14 @@ class EmailVerification
             !isset($stored['timestamp']) ||
             $stored['timestamp'] === ''
         ) {
-            $this->incrementAttempts($email);
+            $stored = $this->readOTPAlternative($key);
+            $fromFallback = $stored !== null;
+            if ($stored === null) {
+                $this->incrementAttempts($email);
 
 
-            return false;
+                return false;
+            }
         }
 
         $isValid = OTP::verifyHashedOTP($providedOTP, $stored['otp']);
@@ -380,20 +403,25 @@ class EmailVerification
         if ($isValid) {
             // Clear rate limiting on success
             $this->cache->delete($key);
+            if ($fromFallback) {
+                $this->deleteOTPAlternative($key);
+            }
 
-            // Update email_verified_at timestamp if user exists
-            try {
-                $userRepository = new UserRepository();
-                $user = $userRepository->findByEmail($email);
-                if (is_array($user) && isset($user['uuid'])) {
-                    // Update the email_verified_at timestamp
-                    $userRepository->update($user['uuid'], [
-                        'email_verified_at' => date('Y-m-d H:i:s')
-                    ]);
+            if ($markEmailVerified) {
+                // Update email_verified_at timestamp if user exists
+                try {
+                    $userRepository = new UserRepository();
+                    $user = $userRepository->findByEmail($email);
+                    if (is_array($user) && isset($user['uuid'])) {
+                        // Update the email_verified_at timestamp
+                        $userRepository->update($user['uuid'], [
+                            'email_verified_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    // Log the error but don't fail the verification
+                    error_log("Failed to update email_verified_at timestamp: " . $e->getMessage());
                 }
-            } catch (\Exception $e) {
-                // Log the error but don't fail the verification
-                error_log("Failed to update email_verified_at timestamp: " . $e->getMessage());
             }
 
 
@@ -405,6 +433,116 @@ class EmailVerification
 
 
         return false;
+    }
+
+    /**
+     * @return array{otp:string,timestamp:int}|null
+     */
+    private function readOTPAlternative(string $key): ?array
+    {
+        $filePath = $this->otpAlternativePath($key);
+        if (!is_file($filePath)) {
+            return null;
+        }
+
+        $raw = file_get_contents($filePath);
+        if ($raw === false || $raw === '') {
+            return null;
+        }
+
+        try {
+            $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        if (!is_array($data) || !isset($data['otp'], $data['timestamp'], $data['expiry'])) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        if ((int) $data['expiry'] < time()) {
+            $this->deleteOTPAlternative($key);
+            return null;
+        }
+
+        return [
+            'otp' => (string) $data['otp'],
+            'timestamp' => (int) $data['timestamp'],
+        ];
+    }
+
+    private function deleteOTPAlternative(string $key): void
+    {
+        $filePath = $this->otpAlternativePath($key);
+        if (is_file($filePath)) {
+            @unlink($filePath);
+        }
+    }
+
+    /**
+     * Verify an OTP for password reset and issue a short-lived, single-use reset token.
+     *
+     * @return array{reset_token:string,expires_in:int}|null
+     */
+    public function verifyPasswordResetOTP(string $email, string $providedOTP): ?array
+    {
+        if (!$this->verifyOTP($email, $providedOTP, false)) {
+            return null;
+        }
+
+        $userRepository = new UserRepository();
+        $user = $userRepository->findByEmail($email);
+        if (!is_array($user) || !isset($user['uuid'])) {
+            return null;
+        }
+
+        $token = bin2hex(random_bytes(32));
+        $this->cache->set($this->passwordResetTokenKey($token), [
+            'email' => $email,
+            'user_uuid' => (string) $user['uuid'],
+            'created_at' => time(),
+        ], self::PASSWORD_RESET_TOKEN_TTL);
+
+        return [
+            'reset_token' => $token,
+            'expires_in' => self::PASSWORD_RESET_TOKEN_TTL,
+        ];
+    }
+
+    /**
+     * Consume a password-reset token and return the verified reset subject.
+     *
+     * @return array{email:string,user_uuid:string}|null
+     */
+    public function consumePasswordResetToken(string $token): ?array
+    {
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+            return null;
+        }
+
+        if (!$this->cache->setNx($this->passwordResetConsumedKey($token), '1', self::PASSWORD_RESET_TOKEN_TTL)) {
+            return null;
+        }
+
+        $key = $this->passwordResetTokenKey($token);
+        $stored = $this->cache->get($key);
+        $this->cache->delete($key);
+
+        if (
+            !is_array($stored) ||
+            !isset($stored['email'], $stored['user_uuid']) ||
+            $stored['email'] === '' ||
+            $stored['user_uuid'] === ''
+        ) {
+            return null;
+        }
+
+        return [
+            'email' => (string) $stored['email'],
+            'user_uuid' => (string) $stored['user_uuid'],
+        ];
     }
 
     /**
@@ -612,5 +750,24 @@ class EmailVerification
         // Use base64 encoding and replace characters that might still cause issues
         // The resulting string will be URL-safe and cache-key compliant
         return str_replace(['/', '+', '='], ['_', '-', ''], base64_encode($email));
+    }
+
+    private function otpAlternativePath(string $key): string
+    {
+        $storagePath = $this->context !== null
+            ? config($this->context, 'app.paths.storage_path', __DIR__ . '/../../storage') . '/cache/'
+            : __DIR__ . '/../../storage/cache/';
+
+        return $storagePath . md5($key) . '.tmp';
+    }
+
+    private function passwordResetTokenKey(string $token): string
+    {
+        return self::PASSWORD_RESET_TOKEN_PREFIX . hash('sha256', $token);
+    }
+
+    private function passwordResetConsumedKey(string $token): string
+    {
+        return self::PASSWORD_RESET_CONSUMED_PREFIX . hash('sha256', $token);
     }
 }
