@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Require a purpose-bound, single-use reset token for `POST /auth/reset-password`; `POST /auth/verify-otp` now returns that token when called with `purpose=password_reset`, closing the email-only password reset takeover path.
+
 ## [1.0.0] - 2026-06-05
 
 ### Added
