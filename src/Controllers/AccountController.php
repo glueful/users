@@ -13,6 +13,9 @@ use Glueful\Validation\ValidationException;
 use Glueful\Http\Exceptions\Domain\AuthenticationException;
 use Glueful\Extensions\Users\Services\EmailVerification;
 use Glueful\Extensions\Users\Repositories\UserRepository;
+use Glueful\Extensions\Users\Http\DTOs\OtpDispatchData;
+use Glueful\Routing\Attributes\ApiOperation;
+use Glueful\Routing\Attributes\ApiResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 
 /**
@@ -35,8 +38,16 @@ final class AccountController
         $this->passwordHasher = new PasswordHasher();
     }
 
-    /** Verify email for registration/password reset. @return mixed */
-    public function verifyEmail(SymfonyRequest $request)
+    /** Verify email for registration/password reset. */
+    #[ApiOperation(
+        summary: 'Verify Email',
+        description: 'Sends a verification code to the provided email. Body: `email` (required).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, OtpDispatchData::class, description: 'Verification code has been sent to your email')]
+    #[ApiResponse(400, description: 'Invalid email address')]
+    #[ApiResponse(404, description: 'Email not found')]
+    public function verifyEmail(SymfonyRequest $request): OtpDispatchData
     {
         $postData = RequestHelper::getRequestData($request);
         if (!isset($postData['email'])) {
@@ -49,13 +60,25 @@ final class AccountController
             throw ValidationException::forField('email', $result['message'] ?? 'Failed to send verification email');
         }
 
-        return Response::success([
-            'email' => $postData['email'],
-            'expires_in' => EmailVerification::OTP_EXPIRY_MINUTES * 60
-        ], 'Verification code has been sent to your email');
+        return new OtpDispatchData(
+            email: $postData['email'],
+            expires_in: EmailVerification::OTP_EXPIRY_MINUTES * 60,
+            message: 'Verification code has been sent to your email',
+        );
     }
 
     /** Verify OTP code. @return mixed */
+    #[ApiOperation(
+        summary: 'Verify OTP',
+        description: 'Verifies the one-time password (OTP) sent to a user\'s email. When '
+            . 'purpose=password_reset, returns a short-lived reset_token to submit to '
+            . 'POST /auth/reset-password. Body: `email` (required), `otp` (required), '
+            . '`purpose` (optional; use password_reset for the reset flow).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, description: 'OTP verified successfully')]
+    #[ApiResponse(400, description: 'Invalid OTP')]
+    #[ApiResponse(401, description: 'OTP expired')]
     public function verifyOtp(SymfonyRequest $request)
     {
         $postData = RequestHelper::getRequestData($request);
@@ -88,8 +111,16 @@ final class AccountController
         ], 'OTP verified successfully');
     }
 
-    /** Resend OTP code. @return mixed */
-    public function resendOtp(SymfonyRequest $request)
+    /** Resend OTP code. */
+    #[ApiOperation(
+        summary: 'Resend OTP',
+        description: 'Resends the one-time password (OTP) to the user\'s email. Body: `email` (required).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, OtpDispatchData::class, description: 'OTP resent successfully')]
+    #[ApiResponse(400, description: 'Invalid email address')]
+    #[ApiResponse(404, description: 'Email not found')]
+    public function resendOtp(SymfonyRequest $request): OtpDispatchData
     {
         $postData = RequestHelper::getRequestData($request);
         if (!isset($postData['email'])) {
@@ -102,14 +133,23 @@ final class AccountController
             throw ValidationException::forField('email', $result['message'] ?? 'Failed to send verification email');
         }
 
-        return Response::success([
-            'email' => $postData['email'],
-            'expires_in' => EmailVerification::OTP_EXPIRY_MINUTES * 60
-        ], 'Verification code has been resent to your email');
+        return new OtpDispatchData(
+            email: $postData['email'],
+            expires_in: EmailVerification::OTP_EXPIRY_MINUTES * 60,
+            message: 'Verification code has been resent to your email',
+        );
     }
 
-    /** Initiate password reset. @return mixed */
-    public function forgotPassword(SymfonyRequest $request)
+    /** Initiate password reset. */
+    #[ApiOperation(
+        summary: 'Forgot Password',
+        description: 'Initiates the password reset process by sending a reset code. Body: `email` (required).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, OtpDispatchData::class, description: 'Password reset instructions sent to email')]
+    #[ApiResponse(400, description: 'Invalid email format')]
+    #[ApiResponse(404, description: 'Email not found')]
+    public function forgotPassword(SymfonyRequest $request): OtpDispatchData
     {
         $postData = RequestHelper::getRequestData($request);
         if (!isset($postData['email'])) {
@@ -118,10 +158,11 @@ final class AccountController
 
         if (!$this->userExists($postData['email'])) {
             if ((bool) config($this->context, 'security.auth.generic_error_responses', true)) {
-                return Response::success([
-                    'email' => $postData['email'],
-                    'expires_in' => EmailVerification::OTP_EXPIRY_MINUTES * 60
-                ], 'Password reset instructions have been sent to your email');
+                return new OtpDispatchData(
+                    email: $postData['email'],
+                    expires_in: EmailVerification::OTP_EXPIRY_MINUTES * 60,
+                    message: 'Password reset instructions have been sent to your email',
+                );
             }
             throw ValidationException::forField('email', 'User not found with the provided email address');
         }
@@ -131,14 +172,25 @@ final class AccountController
             throw ValidationException::forField('email', $result['message'] ?? 'Failed to send reset email');
         }
 
-        return Response::success([
-            'email' => $postData['email'],
-            'expires_in' => EmailVerification::OTP_EXPIRY_MINUTES * 60
-        ], 'Password reset instructions have been sent to your email');
+        return new OtpDispatchData(
+            email: $postData['email'],
+            expires_in: EmailVerification::OTP_EXPIRY_MINUTES * 60,
+            message: 'Password reset instructions have been sent to your email',
+        );
     }
 
-    /** Complete password reset. @return mixed */
-    public function resetPassword(SymfonyRequest $request)
+    /** Complete password reset. */
+    #[ApiOperation(
+        summary: 'Reset Password',
+        description: 'Resets the user\'s password using the single-use reset_token returned by '
+            . 'POST /auth/verify-otp with purpose=password_reset. Body: `reset_token` (required), '
+            . '`password` (required).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, description: 'Password has been reset successfully')]
+    #[ApiResponse(400, description: 'Invalid password format')]
+    #[ApiResponse(404, description: 'Email not found')]
+    public function resetPassword(SymfonyRequest $request): Response
     {
         $postData = RequestHelper::getRequestData($request);
         if (!isset($postData['reset_token']) || !isset($postData['password'])) {
