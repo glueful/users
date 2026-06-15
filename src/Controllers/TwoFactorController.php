@@ -11,11 +11,14 @@ use Glueful\Auth\TwoFactor\Exceptions\InvalidTwoFactorCodeException;
 use Glueful\Auth\TwoFactor\Exceptions\TwoFactorNotEnabledException;
 use Glueful\Auth\TwoFactor\Exceptions\TwoFactorReelevationRequiredException;
 use Glueful\Extensions\Users\TwoFactor\TwoFactorService;
+use Glueful\Extensions\Users\Http\DTOs\TwoFactorChallengeData;
 use Glueful\Auth\JWTService;
 use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Helpers\RequestHelper;
 use Glueful\Http\Exceptions\Domain\AuthenticationException;
 use Glueful\Http\Response;
+use Glueful\Routing\Attributes\ApiOperation;
+use Glueful\Routing\Attributes\ApiResponse;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -38,7 +41,17 @@ final class TwoFactorController extends BaseController
         parent::__construct($context);
     }
 
-    public function enable(Request $request): Response
+    #[ApiOperation(
+        summary: 'Enable Two-Factor Authentication',
+        description: 'Begins 2FA enrollment for the authenticated user: emails a 6-digit PIN and '
+            . 'returns a short-lived challenge_token. Submit both to POST /2fa/verify to complete '
+            . 'enrollment.',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, TwoFactorChallengeData::class, description: 'Two-factor code sent')]
+    #[ApiResponse(401, description: 'Authentication required')]
+    #[ApiResponse(429, description: 'Too many requests')]
+    public function enable(Request $request): TwoFactorChallengeData
     {
         $userUuid = $this->userContext->getUserUuid();
         $user = $this->userContext->getUser();
@@ -48,13 +61,25 @@ final class TwoFactorController extends BaseController
 
         $challenge = $this->twoFactor->beginEnable($userUuid, (string) $user->email());
 
-        return Response::success([
-            'challenge_token' => $challenge['token'],
-            'expires_in' => $challenge['expires_in'],
-            'delivered_to' => $challenge['delivered_to'],
-        ], 'Two-factor code sent');
+        return new TwoFactorChallengeData(
+            challenge_token: $challenge['token'],
+            expires_in: $challenge['expires_in'],
+            delivered_to: $challenge['delivered_to'],
+        );
     }
 
+    #[ApiOperation(
+        summary: 'Verify Two-Factor Code',
+        description: 'Verifies the emailed PIN against a challenge_token. No auth header is required — '
+            . 'the challenge_token authenticates the request. For a login challenge it completes login '
+            . 'and returns the full session (identical to POST /auth/login); for an enrollment challenge '
+            . 'it returns just {success, message}. Body: `challenge_token` (required), `code` (required, '
+            . '6-digit PIN).',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, description: 'Verification successful')]
+    #[ApiResponse(401, description: 'Invalid or expired verification')]
+    #[ApiResponse(429, description: 'Too many requests')]
     public function verify(Request $request): Response
     {
         $payload = RequestHelper::getRequestData($request);
@@ -86,6 +111,17 @@ final class TwoFactorController extends BaseController
         return Response::success(null, 'Two-factor authentication enabled');
     }
 
+    #[ApiOperation(
+        summary: 'Disable Two-Factor Authentication',
+        description: 'Disables 2FA for the authenticated user. Requires a recent 2FA verification on '
+            . 'the current session (within the configured freshness window); otherwise re-elevation '
+            . 'is required.',
+        tags: ['Authentication'],
+    )]
+    #[ApiResponse(200, description: 'Two-factor authentication disabled')]
+    #[ApiResponse(401, description: 'Authentication required')]
+    #[ApiResponse(403, description: 'Recent two-factor verification is required to perform this action')]
+    #[ApiResponse(429, description: 'Too many requests')]
     public function disable(Request $request): Response
     {
         $userUuid = $this->userContext->getUserUuid();

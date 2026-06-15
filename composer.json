@@ -12,7 +12,7 @@
         "php": "^8.3"
     },
     "require-dev": {
-        "glueful/framework": "^1.56.0",
+        "glueful/framework": "^1.57.0",
         "phpunit/phpunit": "^10.0",
         "phpstan/phpstan": "^1.10"
     },
@@ -34,7 +34,7 @@
             "name": "Users",
             "displayName": "Users (Identity & Accounts)",
             "description": "First-party identity store and account lifecycle for Glueful",
-            "version": "1.0.1",
+            "version": "1.1.0",
             "categories": [
                 "authentication",
                 "users"
@@ -42,7 +42,7 @@
             "publisher": "glueful-team",
             "provider": "Glueful\\Extensions\\Users\\UsersServiceProvider",
             "requires": {
-                "glueful": ">=1.56.0",
+                "glueful": ">=1.57.0",
                 "extensions": []
             }
         }

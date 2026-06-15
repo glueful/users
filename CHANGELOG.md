@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-14
+
+### Added
+
+- Typed response DTOs `TwoFactorChallengeData` and `OtpDispatchData`, returned from the
+  two-factor challenge and OTP-dispatch endpoints. Response envelopes remain byte-identical
+  via `HasResponseMessage`.
+
+### Changed
+
+- Migrated OpenAPI documentation to the framework 1.57.0 reflect generator. Route
+  documentation (summaries, query parameters, request-body fields and response codes)
+  is now expressed as typed `#[ApiOperation]`, `#[QueryParam]` and `#[ApiResponse]`
+  attributes on the controller methods; the now-inert route-file docblocks were removed.
+  Docs-only — no runtime behaviour changes.
+- Raised the minimum framework requirement to `^1.57.0`.
+
 ## [1.0.1] - 2026-06-13
 
 ### Fixed
