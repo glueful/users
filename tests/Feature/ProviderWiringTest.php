@@ -14,7 +14,7 @@ use Symfony\Component\HttpFoundation\Request;
  *
  * NOTE ON ISOLATION: the plan called for `@runInSeparateProcess` to defeat
  * `ServiceProvider::loadRoutesFrom()`'s function-`static $loaded` realpath cache (which persists
- * for the whole PHP process and is NOT reset by `RouteManifest::reset()`, so a second register()
+ * for the whole PHP process and is NOT reset by `RouteManifest::reset()`, so a second boot()
  * silently skips re-loading a file a fresh router never received). That mechanism is unusable here:
  * `Framework::boot()` is incompatible with PHPUnit's child-process result serialization — a bare
  * isolated test passes, but one that boots the framework dies with "child process ended
@@ -23,13 +23,13 @@ use Symfony\Component\HttpFoundation\Request;
  *  - Route-FILE presence (/me, /users/{uuid}) is asserted by requiring the file directly into a
  *    fresh Router (`loadRouteFile()`), which bypasses `loadRoutesFrom()`'s static cache entirely —
  *    so these hold under any test order.
- *  - The real `register()` GATING branch (load lookup only when enabled) is exercised via absence
+ *  - The real `boot()` GATING branch (load lookup only when enabled) is exercised via absence
  *    (always robust: a fresh router never matched /users) and via the enabled case being the sole
  *    loader of `user-lookup.php` through `loadRoutesFrom()`, so it is always the first to populate
  *    that file's static cache entry regardless of order.
  *
- * We deliberately do NOT assert /me presence through `register()`: `routes/users.php` is loaded by
- * every register() call, so under a randomized order another test's register() can populate the
+ * We deliberately do NOT assert /me presence through `boot()`: `routes/users.php` is loaded by
+ * every boot() call, so under a randomized order another test's boot() can populate the
  * static cache first, leaving this test's fresh router without it. The direct-file test covers /me.
  */
 final class ProviderWiringTest extends AppTestCase
@@ -44,11 +44,12 @@ final class ProviderWiringTest extends AppTestCase
         return $router;
     }
 
-    private function registerProvider(): Router
+    private function bootProvider(): Router
     {
         $container = $this->app->getContainer();
         $provider = new UsersServiceProvider($container);
         $provider->register($this->context);
+        $provider->boot($this->context);
         return $container->get(Router::class);
     }
 
@@ -86,17 +87,17 @@ final class ProviderWiringTest extends AppTestCase
     public function test_register_gates_lookup_off_by_default(): void
     {
         // Absence is order-independent: a freshly-booted router only ever matches /users if THIS
-        // register() loaded user-lookup.php, which it must not when the lookup is disabled.
+        // boot() loaded user-lookup.php, which it must not when the lookup is disabled.
         $this->bootApp(); // no app config/users.php → shipped default (lookup disabled)
-        $router = $this->registerProvider();
+        $router = $this->bootProvider();
         self::assertNull($router->match(Request::create('/users/u-1', 'GET')), 'lookup gated off by default');
     }
 
     // NB: `/users/{uuid}` presence is asserted order-independently by
     // test_lookup_route_file_registers_route (direct file load). A register()-based presence test
-    // for routes/user-lookup.php would be order-dependent now that the Phase 2 list tests also load
-    // that file via register() — loadRoutesFrom()'s static $loaded cache makes only the first loader
-    // win. The register() conditional-load path is covered by test_list_route_present_when_both_flags
+    // for routes/user-lookup.php would be order-dependent now that the Phase 2 list tests also boot
+    // that file via boot() — loadRoutesFrom()'s static $loaded cache makes only the first loader
+    // win. The boot() conditional-load path is covered by test_list_route_present_when_both_flags
     // (sole register()-loader of routes/user-list.php) plus the absence tests.
 
     public function test_provider_declares_users_read_permission(): void
@@ -110,7 +111,7 @@ final class ProviderWiringTest extends AppTestCase
     public function test_two_factor_routes_follow_auth_config_gate(): void
     {
         $this->bootApp(['auth.php' => "['two_factor'=>['enabled'=>true]]"]);
-        $router = $this->registerProvider();
+        $router = $this->bootProvider();
 
         self::assertNotNull($router->match(Request::create('/2fa/enable', 'POST')));
     }
@@ -134,14 +135,14 @@ final class ProviderWiringTest extends AppTestCase
     {
         // lookup on, list off → no /users
         $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>false]]]"]);
-        $router = $this->registerProvider();
+        $router = $this->bootProvider();
         self::assertNull($router->match(Request::create('/users', 'GET')), 'list gated off when list.enabled=false');
     }
 
     public function test_list_route_present_when_both_flags(): void
     {
         $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>true]]]"]);
-        $router = $this->registerProvider();
+        $router = $this->bootProvider();
         self::assertNotNull($router->match(Request::create('/users', 'GET')), 'list registered when both flags on');
     }
 

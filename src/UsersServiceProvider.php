@@ -58,23 +58,6 @@ final class UsersServiceProvider extends ServiceProvider
         // Register shipped config defaults (requires framework ^1.50.1, where mergeConfig() was
         // fixed). An app's config/users.php overrides per key.
         $this->mergeConfig('users', require __DIR__ . '/../config/users.php');
-
-        $this->loadRoutesFrom(__DIR__ . '/../routes/account.php');
-        if ((bool) config($context, 'auth.two_factor.enabled', false)) {
-            $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
-        }
-        $this->loadRoutesFrom(__DIR__ . '/../routes/users.php');
-
-        if ((bool) config($context, 'users.user_lookup.enabled', false)) {
-            $this->loadRoutesFrom(__DIR__ . '/../routes/user-lookup.php');
-
-            if ((bool) config($context, 'users.user_lookup.list.enabled', false)) {
-                $this->loadRoutesFrom(__DIR__ . '/../routes/user-list.php');
-            }
-        }
-
-        // Identity/auth schema must migrate before app + dependent extensions.
-        $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
     }
 
     /** @return list<\Glueful\Permissions\Catalog\Permission> */
@@ -91,6 +74,23 @@ final class UsersServiceProvider extends ServiceProvider
 
     public function boot(ApplicationContext $context): void
     {
+        // Identity/auth schema must migrate before app + dependent extensions.
+        $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
+
+        $this->loadRoutesFrom(__DIR__ . '/../routes/account.php');
+        if ((bool) config($context, 'auth.two_factor.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/2fa.php');
+        }
+        $this->loadRoutesFrom(__DIR__ . '/../routes/users.php');
+
+        if ((bool) config($context, 'users.user_lookup.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/user-lookup.php');
+
+            if ((bool) config($context, 'users.user_lookup.list.enabled', false)) {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/user-list.php');
+            }
+        }
+
         $this->discoverCommands('Glueful\\Extensions\\Users\\Console', __DIR__ . '/Console');
     }
 }
