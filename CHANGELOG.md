@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-16
+
+### Fixed
+
+- Register migration paths during provider boot so `migrate:run` sees the identity
+  schema through the same CLI lifecycle used by other extension migrations.
+- Register route files during provider boot so users routes follow the same runtime
+  wiring lifecycle as other route-owning extensions.
+
 ## [1.1.0] - 2026-06-14
 
 ### Added
