@@ -66,7 +66,11 @@ final class ProfileResponder
     /**
      * Build a paginated list of users (audience 'users') + nested basic profile.
      *
-     * @return array{items: list<array<string,mixed>>, pagination: array<string,mixed>}
+     * Returns the framework's flat pagination shape: the projected rows in `data`, plus the
+     * pagination meta (`current_page`, `per_page`, `total`, `last_page`, `has_more`, `from`, `to`, …)
+     * at the top level.
+     *
+     * @return array{data: list<array<string,mixed>>, current_page: int, per_page: int, total: int, last_page: int, has_more: bool}
      */
     public function buildList(string $audience, Request $request, int $page, int $perPage): array
     {
@@ -94,16 +98,13 @@ final class ProfileResponder
             $items[] = $this->projector->project($merged, $eff['allow'], $fields);
         }
 
-        return [
-            'items' => $items,
-            'pagination' => [
-                'page' => $result['current_page'],
-                'per_page' => $result['per_page'],
-                'total' => $result['total'],
-                'total_pages' => $result['last_page'],
-                'has_more' => $result['has_more'],
-            ],
-        ];
+        // Return the framework's flat pagination shape: the projected rows replace the raw rows in
+        // `data`, and the pagination meta (current_page/per_page/total/last_page/has_more/from/to/…)
+        // stays at the top level. The controller hands `data` + this whole array to
+        // Response::successWithMeta(), which hoists the meta keys beside `data` in the envelope —
+        // matching every other paginated endpoint (e.g. Aegis /rbac/roles).
+        $result['data'] = $items;
+        return $result;
     }
 
     /**

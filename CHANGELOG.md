@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.2] - 2026-06-23
+## [2.1.3] - 2026-06-23
+
+### Changed
+- **`GET /users` now returns the framework's flat pagination envelope.** The list response wrapped its
+  rows and metadata in a custom `{ "data": { "items": [...], "pagination": {...} } }` shape; it now
+  matches every other paginated Glueful endpoint (e.g. Aegis `/rbac/roles`) — the rows are the `data`
+  array and the pagination meta (`current_page`, `per_page`, `total`, `last_page`, `has_more`, `from`,
+  `to`, …) sits at the response root, via `Response::successWithMeta()`. `ProfileResponder::buildList()`
+  now returns the flat shape (projected rows in `data` + top-level meta). Clients reading
+  `data.items` / `data.pagination` must switch to `data` + the root-level meta keys.
 
 ### Fixed
 - **`/me`, `/users`, `/users/{uuid}`, `/auth/*` and `/2fa/*` no longer 500 with "Service … not found".**

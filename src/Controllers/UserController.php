@@ -100,6 +100,9 @@ final class UserController extends BaseController
         $perPage = (isset($q['per_page']) && is_numeric($q['per_page'])) ? (int) $q['per_page'] : $defaultPer;
         $perPage = max(1, min($perPage, $maxPer));
 
-        return $this->success($this->responder->buildList('users', $request, $page, $perPage));
+        // Flat pagination envelope (matches Aegis /rbac/roles and the framework's paginate() shape):
+        // `data` holds the rows and the pagination meta is hoisted to the response root.
+        $result = $this->responder->buildList('users', $request, $page, $perPage);
+        return Response::successWithMeta($result['data'], $result, 'Users retrieved successfully');
     }
 }
