@@ -10,7 +10,7 @@ use Glueful\Routing\Router;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * Provider wiring: route registration, config-gated lookup route, and the users.view permission.
+ * Provider wiring: route registration, config-gated lookup route, and the users.view permission guard.
  *
  * NOTE ON ISOLATION: the plan called for `@runInSeparateProcess` to defeat
  * `ServiceProvider::loadRoutesFrom()`'s function-`static $loaded` realpath cache (which persists
@@ -100,12 +100,16 @@ final class ProviderWiringTest extends AppTestCase
     // win. The boot() conditional-load path is covered by test_list_route_present_when_both_flags
     // (sole register()-loader of routes/user-list.php) plus the absence tests.
 
-    public function test_provider_declares_users_view_permission(): void
+    public function test_provider_declares_no_catalog_permissions(): void
     {
+        // The user-read slug is `users.view`, a framework CORE_PERMISSION already declared in the
+        // catalog. The extension must NOT re-declare it (that raises DuplicatePermissionException);
+        // it only guards on it via #[RequiresPermission('users.view')].
         $this->bootApp();
         $provider = new UsersServiceProvider($this->app->getContainer());
         $slugs = array_map(static fn($p) => $p->slug(), $provider->permissions());
-        self::assertContains('users.view', $slugs);
+        self::assertNotContains('users.view', $slugs);
+        self::assertSame([], $slugs);
     }
 
     public function test_two_factor_routes_follow_auth_config_gate(): void

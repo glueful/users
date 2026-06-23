@@ -9,7 +9,6 @@ use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Auth\Contracts\UserProviderInterface;
 use Glueful\Auth\Contracts\TwoFactorServiceInterface;
 use Glueful\Database\Migrations\MigrationPriority;
-use Glueful\Permissions\Catalog\Permission;
 use Glueful\Extensions\Users\Support\PayloadProjector;
 use Glueful\Extensions\Users\Support\ProfileFieldResolver;
 use Glueful\Extensions\Users\Support\ProfileResponder;
@@ -60,17 +59,10 @@ final class UsersServiceProvider extends ServiceProvider
         $this->mergeConfig('users', require __DIR__ . '/../config/users.php');
     }
 
-    /** @return list<\Glueful\Permissions\Catalog\Permission> */
-    public function permissions(): array
-    {
-        return [
-            Permission::define('users.view')
-                ->label('View users')
-                ->description("View another user's account and public profile via GET /users/{uuid}")
-                ->category('users')
-                ->managedBy('glueful/users'),
-        ];
-    }
+    // No permissions() override: the user-read slug is `users.view`, a framework CORE_PERMISSION
+    // already declared in the catalog under "glueful/framework" (and seeded by Aegis). Re-declaring
+    // it here would raise a DuplicatePermissionException. The endpoints still guard on it via
+    // #[RequiresPermission('users.view')].
 
     public function boot(ApplicationContext $context): void
     {
