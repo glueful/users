@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.1] - 2026-06-23
+## [2.1.2] - 2026-06-23
+
+### Fixed
+- **`/me`, `/users`, `/users/{uuid}`, `/auth/*` and `/2fa/*` no longer 500 with "Service … not found".**
+  None of the extension's controllers (`AccountController`, `TwoFactorController`, `UserController`) were
+  registered in `UsersServiceProvider::services()`. The framework router resolves a route's
+  `[Controller::class, 'method']` handler via `container->get($class)` with **no autowire fallback**, so
+  hitting any of these routes threw a container "not found" (500) the moment the controller had to be
+  built. All three are now registered (`autowire => true`). This surfaced once the permission gate
+  started passing (framework 1.61.2) — previously the 403 masked it.
 
 ### Fixed
 
