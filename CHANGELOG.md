@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-06-23
+
+### Changed
+
+- **BREAKING: all extension routes are now versioned under the API prefix** — `/auth/*` →
+  `/v1/auth/*`, `/me` → `/v1/me`, `/users*` → `/v1/users*`, `/2fa/*` → `/v1/2fa/*`.
+  `UsersServiceProvider::boot()` now wraps its route loading in `api_prefix()`, matching how the
+  framework versions its own routes (`RouteManifest`) and honouring `API_USE_PREFIX` /
+  `API_VERSION_IN_PATH`. Previously these routes registered raw, leaving account/2FA/user
+  endpoints unversioned while the framework's own `/v1/auth/login` was versioned. Update any
+  client to the versioned paths.
+
 ## [1.1.1] - 2026-06-16
 
 ### Fixed

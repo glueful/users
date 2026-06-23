@@ -113,7 +113,9 @@ final class ProviderWiringTest extends AppTestCase
         $this->bootApp(['auth.php' => "['two_factor'=>['enabled'=>true]]"]);
         $router = $this->bootProvider();
 
-        self::assertNotNull($router->match(Request::create('/2fa/enable', 'POST')));
+        // boot() versions all users routes via api_prefix(), so the 2FA route is at <prefix>/2fa/enable.
+        $prefix = api_prefix($this->context);
+        self::assertNotNull($router->match(Request::create($prefix . '/2fa/enable', 'POST')));
     }
 
     public function test_show_method_carries_requires_permission(): void
@@ -136,14 +138,16 @@ final class ProviderWiringTest extends AppTestCase
         // lookup on, list off → no /users
         $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>false]]]"]);
         $router = $this->bootProvider();
-        self::assertNull($router->match(Request::create('/users', 'GET')), 'list gated off when list.enabled=false');
+        $prefix = api_prefix($this->context);
+        self::assertNull($router->match(Request::create($prefix . '/users', 'GET')), 'list gated off when list.enabled=false');
     }
 
     public function test_list_route_present_when_both_flags(): void
     {
         $this->bootApp(['users.php' => "['user_lookup'=>['enabled'=>true,'list'=>['enabled'=>true]]]"]);
         $router = $this->bootProvider();
-        self::assertNotNull($router->match(Request::create('/users', 'GET')), 'list registered when both flags on');
+        $prefix = api_prefix($this->context);
+        self::assertNotNull($router->match(Request::create($prefix . '/users', 'GET')), 'list registered when both flags on');
     }
 
     public function test_index_method_carries_requires_permission(): void
