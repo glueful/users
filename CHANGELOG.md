@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-06-23
+
+### Fixed
+
+- Remove the extension's own `users.view` catalog declaration. `users.view` is a framework
+  `CORE_PERMISSION` already registered in the permission catalog under `glueful/framework`, so
+  declaring it again in `UsersServiceProvider::permissions()` raised a `DuplicatePermissionException`
+  on boot (breaking `generate:openapi` and app start). The endpoints still guard on `users.view` via
+  `#[RequiresPermission]`; only the redundant declaration is gone.
+
 ## [2.1.0] - 2026-06-23
 
 ### Changed
