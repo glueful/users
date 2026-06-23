@@ -161,4 +161,18 @@ final class ProviderWiringTest extends AppTestCase
         self::assertCount(1, $attrs);
         self::assertSame('users.view', $attrs[0]->newInstance()->name);
     }
+
+    public function test_provider_registers_all_controllers(): void
+    {
+        // The router resolves a route handler via container->get($class) with no autowire fallback,
+        // so every routed controller MUST be a registered service or its route 500s ("not found").
+        $services = UsersServiceProvider::services();
+        foreach ([
+            \Glueful\Extensions\Users\Controllers\AccountController::class,
+            \Glueful\Extensions\Users\Controllers\TwoFactorController::class,
+            \Glueful\Extensions\Users\Controllers\UserController::class,
+        ] as $controller) {
+            self::assertArrayHasKey($controller, $services, "{$controller} must be registered in services()");
+        }
+    }
 }

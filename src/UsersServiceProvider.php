@@ -49,6 +49,16 @@ final class UsersServiceProvider extends ServiceProvider
             ProfileFieldResolver::class => ['class' => ProfileFieldResolver::class, 'shared' => true, 'autowire' => true],
             PayloadProjector::class => ['class' => PayloadProjector::class, 'shared' => true, 'autowire' => true],
             ProfileResponder::class => ['class' => ProfileResponder::class, 'shared' => true, 'autowire' => true],
+
+            // Controllers must be registered: the router resolves a route's [Controller::class, 'method']
+            // handler via container->get($class) with no autowire fallback, so an unregistered controller
+            // throws "Service not found" (500) the moment its route is hit.
+            Controllers\AccountController::class =>
+                ['class' => Controllers\AccountController::class, 'shared' => true, 'autowire' => true],
+            Controllers\TwoFactorController::class =>
+                ['class' => Controllers\TwoFactorController::class, 'shared' => true, 'autowire' => true],
+            Controllers\UserController::class =>
+                ['class' => Controllers\UserController::class, 'shared' => true, 'autowire' => true],
         ];
     }
 
