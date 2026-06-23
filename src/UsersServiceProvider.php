@@ -64,9 +64,9 @@ final class UsersServiceProvider extends ServiceProvider
     public function permissions(): array
     {
         return [
-            Permission::define('users.read')
-                ->label('Read users')
-                ->description("Read another user's account and public profile via GET /users/{uuid}")
+            Permission::define('users.view')
+                ->label('View users')
+                ->description("View another user's account and public profile via GET /users/{uuid}")
                 ->category('users')
                 ->managedBy('glueful/users'),
         ];

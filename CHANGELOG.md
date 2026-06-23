@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-23
+
+### Changed
+
+- **The user-read permission slug is renamed `users.read` → `users.view`** to follow the framework's
+  `category.action` naming convention (`PermissionStandards::PERMISSION_USERS_VIEW`) and align with the
+  slug Aegis already seeds. The `GET /users/{uuid}` and `GET /users` endpoints now require
+  `users.view`, and the catalog declaration in `UsersServiceProvider::permissions()` declares
+  `users.view`. Note: re-grant any role that previously held `users.read`.
+
 ## [2.0.0] - 2026-06-23
 
 ### Changed

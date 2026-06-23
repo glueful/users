@@ -10,7 +10,7 @@ use Glueful\Routing\Router;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * Provider wiring: route registration, config-gated lookup route, and the users.read permission.
+ * Provider wiring: route registration, config-gated lookup route, and the users.view permission.
  *
  * NOTE ON ISOLATION: the plan called for `@runInSeparateProcess` to defeat
  * `ServiceProvider::loadRoutesFrom()`'s function-`static $loaded` realpath cache (which persists
@@ -100,12 +100,12 @@ final class ProviderWiringTest extends AppTestCase
     // win. The boot() conditional-load path is covered by test_list_route_present_when_both_flags
     // (sole register()-loader of routes/user-list.php) plus the absence tests.
 
-    public function test_provider_declares_users_read_permission(): void
+    public function test_provider_declares_users_view_permission(): void
     {
         $this->bootApp();
         $provider = new UsersServiceProvider($this->app->getContainer());
         $slugs = array_map(static fn($p) => $p->slug(), $provider->permissions());
-        self::assertContains('users.read', $slugs);
+        self::assertContains('users.view', $slugs);
     }
 
     public function test_two_factor_routes_follow_auth_config_gate(): void
@@ -123,7 +123,7 @@ final class ProviderWiringTest extends AppTestCase
         $rm = new \ReflectionMethod(\Glueful\Extensions\Users\Controllers\UserController::class, 'show');
         $attrs = $rm->getAttributes(\Glueful\Auth\Attributes\RequiresPermission::class);
         self::assertCount(1, $attrs);
-        self::assertSame('users.read', $attrs[0]->newInstance()->name);
+        self::assertSame('users.view', $attrs[0]->newInstance()->name);
     }
 
     public function test_user_list_route_file_registers_route(): void
@@ -155,6 +155,6 @@ final class ProviderWiringTest extends AppTestCase
         $rm = new \ReflectionMethod(\Glueful\Extensions\Users\Controllers\UserController::class, 'index');
         $attrs = $rm->getAttributes(\Glueful\Auth\Attributes\RequiresPermission::class);
         self::assertCount(1, $attrs);
-        self::assertSame('users.read', $attrs[0]->newInstance()->name);
+        self::assertSame('users.view', $attrs[0]->newInstance()->name);
     }
 }
