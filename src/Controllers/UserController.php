@@ -54,16 +54,16 @@ final class UserController extends BaseController
         summary: 'Get User by UUID',
         description: 'Returns another user\'s account plus their public `profile`. Off by default — '
             . 'enabled via `USERS_USER_LOOKUP_ENABLED=true` (or `config/users.php`) — and requires the '
-            . '`users.read` permission. Supports REST dot-path field selection via `?fields=`; unknown/'
+            . '`users.view` permission. Supports REST dot-path field selection via `?fields=`; unknown/'
             . 'disallowed fields are pruned. Exposable columns are config-driven (`config/users.php`, '
             . '`users` audience), which is intentionally narrower than the `me` audience.',
         tags: ['Users'],
     )]
     #[ApiResponse(200, description: 'User account and public profile')]
     #[ApiResponse(401, description: 'Authentication required')]
-    #[ApiResponse(403, description: 'Missing the users.read permission')]
+    #[ApiResponse(403, description: 'Missing the users.view permission')]
     #[ApiResponse(404, description: 'User not found')]
-    #[RequiresPermission('users.read')]
+    #[RequiresPermission('users.view')]
     public function show(string $uuid, Request $request): Response
     {
         $payload = $this->responder->build($uuid, 'users', $request);
@@ -77,7 +77,7 @@ final class UserController extends BaseController
     #[ApiOperation(
         summary: 'List Users',
         description: 'Paginated list of users + nested public profile (the `users` audience). Off by '
-            . 'default; enabled via `USERS_USER_LIST_ENABLED=true`. Requires the `users.read` permission. '
+            . 'default; enabled via `USERS_USER_LIST_ENABLED=true`. Requires the `users.view` permission. '
             . 'Supports `?page`/`?per_page` (clamped), per-item `?fields=`, and `?filter[...]`/`?sort`/'
             . '`?search` over username + profile name (email only when `allow_email_filter`). Soft-deleted '
             . 'profiles never affect membership or order.',
@@ -87,8 +87,8 @@ final class UserController extends BaseController
     #[QueryParam('per_page', 'integer', description: 'Items per page (clamped to configured max)')]
     #[ApiResponse(200, description: 'Paginated users')]
     #[ApiResponse(401, description: 'Authentication required')]
-    #[ApiResponse(403, description: 'Missing the users.read permission')]
-    #[RequiresPermission('users.read')]
+    #[ApiResponse(403, description: 'Missing the users.view permission')]
+    #[RequiresPermission('users.view')]
     public function index(Request $request): Response
     {
         $ctx = $this->getContext();

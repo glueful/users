@@ -265,8 +265,8 @@ When `auth.two_factor.enabled` is false (default), the `/2fa/*` routes are not r
 ### Account read endpoints
 
 - `GET /me` — the authenticated principal's account + nested `profile` (auth required, always on).
-- `GET /users/{uuid}` — another user's account + public profile. **Off by default** (`USERS_USER_LOOKUP_ENABLED=true`), requires the `users.read` permission.
-- `GET /users` — paginated list of users + nested public profile. **Off by default** (requires both `USERS_USER_LOOKUP_ENABLED=true` and `USERS_USER_LIST_ENABLED=true`), requires the `users.read` permission.
+- `GET /users/{uuid}` — another user's account + public profile. **Off by default** (`USERS_USER_LOOKUP_ENABLED=true`), requires the `users.view` permission.
+- `GET /users` — paginated list of users + nested public profile. **Off by default** (requires both `USERS_USER_LOOKUP_ENABLED=true` and `USERS_USER_LIST_ENABLED=true`), requires the `users.view` permission.
 
 ```bash
 GET /users?page=1&per_page=25                    # clamped: per_page max 100
