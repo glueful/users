@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Glueful\Extensions\Users\Support;
 
+use Glueful\Auth\Contracts\UserRecordEnricherInterface;
 use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Database\Connection;
 use Glueful\Extensions\Users\Repositories\UserRepository;
@@ -60,13 +61,18 @@ final class ProfileResponder
         $fields = $request->query->all()['fields'] ?? null;
         $fields = is_string($fields) ? $fields : null;
 
-        return $this->projector->project($merged, $eff['allow'], $fields);
+        $record = $this->projector->project($merged, $eff['allow'], $fields);
+        return $this->applyEnrichers([$record])[0] ?? $record;
     }
 
     /**
      * Build a paginated list of users (audience 'users') + nested basic profile.
      *
-     * @return array{items: list<array<string,mixed>>, pagination: array<string,mixed>}
+     * Returns the framework's flat pagination shape: the projected rows in `data`, plus the
+     * pagination meta (`current_page`, `per_page`, `total`, `last_page`, `has_more`, `from`, `to`, …)
+     * at the top level.
+     *
+     * @return array{data: list<array<string,mixed>>, current_page: int, per_page: int, total: int, last_page: int, has_more: bool}
      */
     public function buildList(string $audience, Request $request, int $page, int $perPage): array
     {
@@ -94,16 +100,64 @@ final class ProfileResponder
             $items[] = $this->projector->project($merged, $eff['allow'], $fields);
         }
 
-        return [
-            'items' => $items,
-            'pagination' => [
-                'page' => $result['current_page'],
-                'per_page' => $result['per_page'],
-                'total' => $result['total'],
-                'total_pages' => $result['last_page'],
-                'has_more' => $result['has_more'],
-            ],
-        ];
+        // Return the framework's flat pagination shape: the projected rows replace the raw rows in
+        // `data`, and the pagination meta (current_page/per_page/total/last_page/has_more/from/to/…)
+        // stays at the top level. The controller hands `data` + this whole array to
+        // Response::successWithMeta(), which hoists the meta keys beside `data` in the envelope —
+        // matching every other paginated endpoint (e.g. Aegis /rbac/roles).
+        $result['data'] = $this->applyEnrichers($items);
+        return $result;
+    }
+
+    /**
+     * Fold any registered user-record enrichers' fields into these rows (matched by `uuid`), e.g.
+     * Aegis attaching `roles`. The identity store stays decoupled: it merges whatever extensions
+     * tagged `users.record_enricher` contribute and no-ops when none are registered.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function applyEnrichers(array $rows): array
+    {
+        if ($rows === [] || !$this->context->hasContainer()) {
+            return $rows;
+        }
+        $container = $this->context->getContainer();
+        if (!$container->has('users.record_enricher')) {
+            return $rows;
+        }
+        $enrichers = $container->get('users.record_enricher');
+        if (!is_array($enrichers) || $enrichers === []) {
+            return $rows;
+        }
+
+        $uuids = [];
+        foreach ($rows as $row) {
+            if (isset($row['uuid']) && is_string($row['uuid'])) {
+                $uuids[] = $row['uuid'];
+            }
+        }
+        if ($uuids === []) {
+            return $rows;
+        }
+
+        // Union the contributions of every enricher, then merge into the matching rows.
+        $extra = [];
+        foreach ($enrichers as $enricher) {
+            if (!$enricher instanceof UserRecordEnricherInterface) {
+                continue;
+            }
+            foreach ($enricher->enrich($uuids) as $uuid => $fields) {
+                $extra[$uuid] = array_merge($extra[$uuid] ?? [], $fields);
+            }
+        }
+        foreach ($rows as $i => $row) {
+            $uuid = $row['uuid'] ?? null;
+            if (is_string($uuid) && isset($extra[$uuid])) {
+                $rows[$i] = array_merge($row, $extra[$uuid]);
+            }
+        }
+        return $rows;
     }
 
     /**

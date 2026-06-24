@@ -44,9 +44,9 @@ final class UserListResponderTest extends AppTestCase
     {
         $this->boot();
         $out = $this->responder->buildList('users', $this->req(), 1, 25);
-        $byUuid = array_column($out['items'], null, 'uuid');
+        $byUuid = array_column($out['data'], null, 'uuid');
 
-        self::assertCount(3, $out['items']);
+        self::assertCount(3, $out['data']);
         self::assertSame('Jane', $byUuid['u-1']['profile']['first_name']);
         self::assertNull($byUuid['u-2']['profile'], 'no-profile → null');
         self::assertNull($byUuid['u-3']['profile'], 'soft-deleted profile → null');
@@ -57,7 +57,7 @@ final class UserListResponderTest extends AppTestCase
     {
         $this->boot();
         $out = $this->responder->buildList('users', $this->req('search=Jane'), 1, 25);
-        $uuids = array_column($out['items'], 'uuid');
+        $uuids = array_column($out['data'], 'uuid');
         self::assertContains('u-1', $uuids, 'active Jane matches');
         self::assertNotContains('u-3', $uuids, 'soft-deleted Jane must NOT match (no leak)');
     }
@@ -66,7 +66,7 @@ final class UserListResponderTest extends AppTestCase
     {
         $this->boot();
         $out = $this->responder->buildList('users', $this->req('filter[profile][first_name]=Jane'), 1, 25);
-        $uuids = array_column($out['items'], 'uuid');
+        $uuids = array_column($out['data'], 'uuid');
         self::assertSame(['u-1'], $uuids);
     }
 
@@ -74,20 +74,21 @@ final class UserListResponderTest extends AppTestCase
     {
         $this->boot();
         $out = $this->responder->buildList('users', $this->req('fields=username,profile.first_name'), 1, 25);
-        $byUuid = array_column($out['items'], null, 'username');
+        $byUuid = array_column($out['data'], null, 'username');
         self::assertSame(['username', 'profile'], array_keys($byUuid['alice']));
         self::assertSame(['first_name' => 'Jane'], $byUuid['alice']['profile']);
     }
 
-    public function test_pagination_metadata_outside_items(): void
+    public function test_pagination_metadata_is_flat_at_top_level(): void
     {
         $this->boot();
         $out = $this->responder->buildList('users', $this->req(), 1, 2);
-        self::assertSame(1, $out['pagination']['page']);
-        self::assertSame(2, $out['pagination']['per_page']);
-        self::assertSame(3, $out['pagination']['total']);
-        self::assertSame(2, $out['pagination']['total_pages']);
-        self::assertCount(2, $out['items']);
+        self::assertSame(1, $out['current_page']);
+        self::assertSame(2, $out['per_page']);
+        self::assertSame(3, $out['total']);
+        self::assertSame(2, $out['last_page']);
+        self::assertTrue($out['has_more'], 'page 1 of 2 → there is another page');
+        self::assertCount(2, $out['data']);
     }
 
     public function test_sort_not_affected_by_soft_deleted_profile_value(): void
@@ -103,7 +104,7 @@ final class UserListResponderTest extends AppTestCase
         $this->db()->table('profiles')->where(['user_uuid' => 's-c'])->update(['deleted_at' => '2026-01-01 00:00:00']);
 
         $out = $this->responder->buildList('users', $this->req('sort=first_name&per_page=100'), 1, 100);
-        $uuids = array_column($out['items'], 'uuid');
+        $uuids = array_column($out['data'], 'uuid');
         $pa = array_search('s-a', $uuids, true);
         $pb = array_search('s-b', $uuids, true);
         $pc = array_search('s-c', $uuids, true);
