@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.3] - 2026-06-23
+## [2.2.0] - 2026-06-24
+
+### Added
+- **User read payloads can now carry extension-owned fields (e.g. roles).** `/me`, `/users` and
+  `/users/{uuid}` now run every service tagged `users.record_enricher` (framework 1.62.0's
+  `UserRecordEnricherInterface`) over the records they return and merge the result into each one —
+  matched by `uuid`, after projection, in one batched pass. This lets glueful/aegis attach a user's
+  `roles` (so an admin sees them inline, no second request) without this package depending on it; any
+  app without an enricher is unaffected (no-op). Requires framework `^1.62.0`.
 
 ### Changed
 - **`GET /users` now returns the framework's flat pagination envelope.** The list response wrapped its
