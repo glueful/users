@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-24
+
+### Added
+- **`UserRepository::softDelete()` / `restore()`** — data-access primitives for marking a user row
+  deleted (and reversing it) via the store's `deleted_at` convention, so a soft-deleted account drops
+  out of `/me` and `/users` (which scope `users.deleted_at IS NULL`) while the row is preserved.
+  `softDelete()` overrides the status-column variant inherited from `BaseRepository` to match this
+  store's timestamp soft-delete. These are primitives only — the consuming app owns the policy (who
+  may delete, self-delete guards, cascades). Pairs with the existing `create()`/`update()`/
+  `emailExists()`/`usernameExists()` so an app can build admin user management without reaching into
+  the `users`/`profiles` schema.
+
 ## [2.2.0] - 2026-06-24
 
 ### Added
