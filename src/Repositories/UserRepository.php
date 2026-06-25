@@ -791,6 +791,34 @@ class UserRepository extends BaseRepository
     }
 
     /**
+     * Soft-delete a user (set `deleted_at`). The read paths scope `users.deleted_at IS NULL`, so the
+     * account disappears from `/me`/`/users` while the row (and its history) is preserved. A
+     * data-access primitive — the calling app owns the policy (who may delete, self-delete guards, …).
+     *
+     * Overrides {@see \Glueful\Repository\BaseRepository::softDelete()} (a status-column variant) to
+     * use this store's `deleted_at` convention; the inherited status params are intentionally unused.
+     *
+     * @param string $uuid User UUID
+     * @return bool True if a row was updated
+     */
+    public function softDelete(string $uuid, string $statusColumn = 'status', $deletedValue = 'deleted'): bool
+    {
+        unset($statusColumn, $deletedValue);
+        return $this->update($uuid, ['deleted_at' => date('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * Reverse a soft-delete (clear `deleted_at`).
+     *
+     * @param string $uuid User UUID
+     * @return bool True if a row was updated
+     */
+    public function restore(string $uuid): bool
+    {
+        return $this->update($uuid, ['deleted_at' => null]);
+    }
+
+    /**
      * Deactivate users by UUIDs
      *
      * @param array<string> $uuids Array of user UUIDs

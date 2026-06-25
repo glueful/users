@@ -34,7 +34,7 @@
             "name": "Users",
             "displayName": "Users (Identity & Accounts)",
             "description": "First-party identity store and account lifecycle for Glueful",
-            "version": "2.2.0",
+            "version": "2.3.0",
             "categories": [
                 "authentication",
                 "users"
