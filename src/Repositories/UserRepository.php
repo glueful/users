@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Glueful\Extensions\Users\Repositories;
 
 use Glueful\Repository\BaseRepository;
+use Glueful\Helpers\Utils;
 use Glueful\DTOs\{UsernameDTO, EmailDTO};
 use Glueful\Validation\Validator;
 use Glueful\Database\Connection;
@@ -432,7 +433,12 @@ class UserRepository extends BaseRepository
                 // Update existing profile
                 $success = parent::update($uuid, $profileData);
             } else {
-                // Create new profile
+                // Create new profile. The working primary key is user_uuid here, so
+                // BaseRepository::create() won't generate the row's own uuid — set it explicitly
+                // (profiles.uuid is NOT NULL + UNIQUE).
+                if (empty($profileData['uuid'])) {
+                    $profileData['uuid'] = Utils::generateNanoID();
+                }
                 $createResult = parent::create($profileData);
                 $success = $createResult !== '';
             }
@@ -481,7 +487,7 @@ class UserRepository extends BaseRepository
      *
      * @param array<string, mixed> $userData User data extracted from SAML attributes (email required)
      * @return array<string, mixed>|null User data array with updated provider info, or null on failure
-     * @throws \Glueful\Http\Exceptions\Domain\DatabaseException If user creation or update fails
+     * @throws DatabaseException If user creation or update fails
      * @throws \InvalidArgumentException If required SAML attributes are missing
      * @throws \RuntimeException If transaction operations fail
      */
@@ -633,7 +639,7 @@ class UserRepository extends BaseRepository
         }
 
         $this->db->table('profiles')->insert(array_merge([
-            'uuid' => \Glueful\Helpers\Utils::generateNanoID(),
+            'uuid' => Utils::generateNanoID(),
             'user_uuid' => $userUuid,
             'status' => 'active',
         ], $data));

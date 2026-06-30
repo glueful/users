@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-06-30
+
+### Fixed
+- **New profile rows now get their own `uuid`.** `updateProfile()` runs with `user_uuid` as the
+  working primary key, so `BaseRepository::create()` — which only generates the *primary key* — never
+  populated the profile row's own `uuid` (`profiles.uuid` is NOT NULL + UNIQUE). It now generates one
+  via `Utils::generateNanoID()` when creating a profile, and only when absent so updates never
+  overwrite an existing uuid. Affects every caller that creates a profile (e.g. admin user creation
+  and CSV import).
+
 ## [2.3.0] - 2026-06-24
 
 ### Added
