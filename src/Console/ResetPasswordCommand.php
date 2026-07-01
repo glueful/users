@@ -42,7 +42,7 @@ class ResetPasswordCommand extends BaseSecurityCommand
              )
              ->addOption(
                  'notify',
-                 'n',
+                 null,
                  InputOption::VALUE_NONE,
                  'Send notification email to the user'
              )

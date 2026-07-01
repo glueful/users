@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-07-01
+
+### Fixed
+- **`security:reset-password` is runnable again.** Its `--notify` option declared the shortcut `-n`,
+  which collides with Symfony's reserved global `-n/--no-interaction`. Symfony threw
+  `An option with shortcut "n" already exists` when merging the command definition with the
+  application's — on both run and `help` — so the command could not be invoked at all. Dropped the
+  `-n` shortcut; the `--notify` long option is unchanged.
+
 ## [2.3.1] - 2026-06-30
 
 ### Fixed
