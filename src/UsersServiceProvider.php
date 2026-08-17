@@ -8,7 +8,6 @@ use Glueful\Extensions\ServiceProvider;
 use Glueful\Bootstrap\ApplicationContext;
 use Glueful\Auth\Contracts\UserProviderInterface;
 use Glueful\Auth\Contracts\TwoFactorServiceInterface;
-use Glueful\Database\Migrations\MigrationPriority;
 use Glueful\Extensions\Users\Support\PayloadProjector;
 use Glueful\Extensions\Users\Support\ProfileFieldResolver;
 use Glueful\Extensions\Users\Support\ProfileResponder;
@@ -77,7 +76,7 @@ final class UsersServiceProvider extends ServiceProvider
     public function boot(ApplicationContext $context): void
     {
         // Identity/auth schema must migrate before app + dependent extensions.
-        $this->loadMigrationsFrom(__DIR__ . '/../migrations', MigrationPriority::IDENTITY, 'glueful/users');
+        // Migrations are declared by the composer manifest (extra.glueful.migrations).
 
         // Version all of this extension's API routes (e.g. /v1/auth/*, /v1/2fa/*, /v1/me) so they
         // sit at the same prefix as the framework's own routes. api_prefix() honours
