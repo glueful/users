@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-22
+
 ### Added
 - `EmailVerification::sendPasswordResetEmail()` takes an optional template name (default
   `password-reset`), so a host can send its own audience's reset mail through its own registered
