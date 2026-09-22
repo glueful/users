@@ -591,9 +591,15 @@ class EmailVerification
      *
      * @param string $email User email address
      * @param ApplicationContext|null $context Application context for container resolution
+     * @param string $templateName Registered email template to send through; a host with its own
+     *        audience (a storefront's customers) passes its own template
      * @return array{success: bool, message: string, error_code?: string} Operation result with status
      */
-    public static function sendPasswordResetEmail(string $email, ?ApplicationContext $context = null): array
+    public static function sendPasswordResetEmail(
+        string $email,
+        ?ApplicationContext $context = null,
+        string $templateName = 'password-reset',
+    ): array
     {
         try {
             $verifier = new self(context: $context);
@@ -685,7 +691,7 @@ class EmailVerification
                     'expiry_minutes' => self::OTP_EXPIRY_MINUTES,
                     'subject' => 'Password reset requested',
                     'title' => 'Password reset requested for',
-                    'template_name' => 'password-reset',
+                    'template_name' => $templateName,
                 ],
                 ['channels' => ['email']]
             );
