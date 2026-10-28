@@ -6,6 +6,9 @@ namespace Glueful\Extensions\Users\Controllers;
 
 use Glueful\Controllers\BaseController;
 use Glueful\Auth\LoginResponseShaper;
+use Glueful\Auth\Session\AuthenticatedSession;
+use Glueful\Auth\Session\SessionCookieConfig;
+use Glueful\Auth\Session\SessionCookieIssuer;
 use Glueful\Auth\TwoFactor\Exceptions\InvalidChallengeTokenException;
 use Glueful\Auth\TwoFactor\Exceptions\InvalidTwoFactorCodeException;
 use Glueful\Auth\TwoFactor\Exceptions\TwoFactorNotEnabledException;
@@ -74,7 +77,8 @@ final class TwoFactorController extends BaseController
             . 'the challenge_token authenticates the request. For a login challenge it completes login '
             . 'and returns the full session (identical to POST /auth/login); for an enrollment challenge '
             . 'it returns just {success, message}. Body: `challenge_token` (required), `code` (required, '
-            . '6-digit PIN).',
+            . '6-digit PIN), `auth_transport` (optional: "cookie" completes a login with the browser-session '
+            . 'cookies instead of tokens in the body, as on POST /auth/login).',
         tags: ['Authentication'],
     )]
     #[ApiResponse(200, description: 'Verification successful')]
@@ -104,6 +108,18 @@ final class TwoFactorController extends BaseController
         if (($result['purpose'] ?? null) === 'login') {
             /** @var array<string, mixed> $session */
             $session = $result['session'] ?? [];
+
+            // A cookie-transport login that hit the 2FA gate finishes here: honour the same
+            // `auth_transport: "cookie"` /auth/login takes, so the session lands in the cookies.
+            $issuer = ($payload['auth_transport'] ?? null) === 'cookie' ? $this->sessionCookieIssuer() : null;
+            if ($issuer !== null) {
+                return $this->loginResponseShaper->shapeForCookies(
+                    $request,
+                    AuthenticatedSession::fromSessionArray($session),
+                    $issuer
+                );
+            }
+
             return $this->loginResponseShaper->shape($request, $session);
         }
 
@@ -140,6 +156,30 @@ final class TwoFactorController extends BaseController
 
         $this->twoFactor->disable($userUuid, $sid);
         return Response::success(null, 'Two-factor authentication disabled');
+    }
+
+    /**
+     * The cookie issuer when the browser-session transport is enabled, otherwise null (the
+     * bearer response). Cookie logins need framework 1.91 (LoginResponseShaper::shapeForCookies);
+     * on older frameworks the transport is ignored, as /auth/login ignores it there.
+     */
+    private function sessionCookieIssuer(): ?SessionCookieIssuer
+    {
+        if (!method_exists($this->loginResponseShaper, 'shapeForCookies')) {
+            return null;
+        }
+
+        $c = container($this->getContext());
+        $config = $c->has(SessionCookieConfig::class)
+            ? $c->get(SessionCookieConfig::class)
+            : SessionCookieConfig::fromContext($this->getContext());
+        if (!$config instanceof SessionCookieConfig || !$config->enabled) {
+            return null;
+        }
+
+        $issuer = $c->has(SessionCookieIssuer::class) ? $c->get(SessionCookieIssuer::class) : null;
+
+        return $issuer instanceof SessionCookieIssuer ? $issuer : new SessionCookieIssuer($config);
     }
 
     /**

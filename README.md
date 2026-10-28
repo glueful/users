@@ -259,7 +259,7 @@ When `auth.two_factor.enabled` is false (default), the `/2fa/*` routes are not r
 ### Two-factor authentication (prefix `/2fa`, only when `auth.two_factor.enabled=true`)
 
 - `POST /2fa/enable` – Begin enrollment: emails a PIN, returns a short-lived `challenge_token` (auth required, rate-limited)
-- `POST /2fa/verify` – Verify a PIN against a `challenge_token`. For a **login** challenge it completes login and returns the full session (identical to `POST /auth/login`); for an **enrollment** challenge it returns `{success, message}`
+- `POST /2fa/verify` – Verify a PIN against a `challenge_token`. For a **login** challenge it completes login and returns the full session (identical to `POST /auth/login`); send `"auth_transport": "cookie"` (as on login) to get the browser-session cookies instead of tokens in the body (framework 1.91+, transport enabled). For an **enrollment** challenge it returns `{success, message}`
 - `POST /2fa/disable` – Disable 2FA (auth required; needs a recent 2FA verification within `disable_freshness`)
 
 ### Account read endpoints
