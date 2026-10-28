@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-28
+
+### Fixed
+- A cookie-transport login that needs a second factor can finish with cookies: `POST /2fa/verify`
+  takes the same `auth_transport: "cookie"` field as `POST /auth/login`. With it, and while the
+  framework's browser-session transport is enabled, a login challenge completes by setting the
+  session cookies and returns a body without the access/refresh tokens; without it (or with the
+  transport disabled) the response is the bearer session as before. Needs framework 1.91+ for the
+  cookie path; on older frameworks the field is ignored.
+
 ## [2.5.0] - 2026-09-22
 
 ### Added
