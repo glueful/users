@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-28
+
 ### Fixed
 - A cookie-transport login that needs a second factor can finish with cookies: `POST /2fa/verify`
   takes the same `auth_transport: "cookie"` field as `POST /auth/login`. With it, and while the
