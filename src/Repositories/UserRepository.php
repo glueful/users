@@ -723,13 +723,7 @@ class UserRepository extends BaseRepository
      */
     public function emailExists(string $email, ?string $excludeUuid = null): bool
     {
-        $conditions = ['email' => $email];
-
-        if ($excludeUuid !== null) {
-            $conditions['uuid'] = ['!=', $excludeUuid];
-        }
-
-        return $this->count($conditions) > 0;
+        return $this->valueTaken('email', $email, $excludeUuid);
     }
 
     /**
@@ -741,13 +735,24 @@ class UserRepository extends BaseRepository
      */
     public function usernameExists(string $username, ?string $excludeUuid = null): bool
     {
-        $conditions = ['username' => $username];
+        return $this->valueTaken('username', $username, $excludeUuid);
+    }
 
+    /**
+     * Whether another user already holds this column value.
+     *
+     * The previous implementation passed `['uuid' => ['!=', $excludeUuid]]` to count(), but the
+     * array form of where() only knows equality and bound the whole array as the value, so any
+     * call with an exclude uuid matched nothing and reported the value as free.
+     */
+    private function valueTaken(string $column, string $value, ?string $excludeUuid): bool
+    {
+        $query = $this->db->table($this->table)->where($column, '=', $value);
         if ($excludeUuid !== null) {
-            $conditions['uuid'] = ['!=', $excludeUuid];
+            $query->where('uuid', '!=', $excludeUuid);
         }
 
-        return $this->count($conditions) > 0;
+        return $query->count() > 0;
     }
 
     /**
