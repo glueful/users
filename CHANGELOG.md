@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-10-29
+
+### Fixed
+- `UserRepository::usernameExists()` and `emailExists()` ignored their `$excludeUuid` argument in
+  the worst way: the exclude was passed to `count()` as `['uuid' => ['!=', $uuid]]`, which the array
+  form of `where()` binds as an equality against the whole array, so the query matched nothing and
+  every call with an exclude reported the value as free. A member re-saving their own username was
+  fine; checking whether a handle belonged to *someone else* always said no. Both now build the
+  query with explicit `where()` calls.
+
 ## [2.5.1] - 2026-10-28
 
 ### Fixed
