@@ -12,7 +12,7 @@
         "php": "^8.3"
     },
     "require-dev": {
-        "glueful/framework": "^1.79",
+        "glueful/framework": "^1.91.3",
         "phpunit/phpunit": "^10.0",
         "phpstan/phpstan": "^1.10"
     },
