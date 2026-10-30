@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.5] - 2026-10-30
+### Fixed
+- `verify-email`, `verify-otp`, `resend-otp`, `forgot-password` and `reset-password` documented no
+  request body, so the generated OpenAPI document (and any client built from it) had no idea which
+  fields to send. Each now carries `#[ApiRequestBody]` with a documentation-only DTO
+  (`EmailInputData`, `VerifyOtpInputData`, `ResetPasswordInputData`); the handlers are unchanged.
+
 ## [2.5.4] - 2026-10-29
 ### Fixed
 - updated glueful/framework requirement to ^1.91.3.
