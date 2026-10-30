@@ -13,8 +13,12 @@ use Glueful\Validation\ValidationException;
 use Glueful\Http\Exceptions\Domain\AuthenticationException;
 use Glueful\Extensions\Users\Services\EmailVerification;
 use Glueful\Extensions\Users\Repositories\UserRepository;
+use Glueful\Extensions\Users\Http\DTOs\EmailInputData;
 use Glueful\Extensions\Users\Http\DTOs\OtpDispatchData;
+use Glueful\Extensions\Users\Http\DTOs\ResetPasswordInputData;
+use Glueful\Extensions\Users\Http\DTOs\VerifyOtpInputData;
 use Glueful\Routing\Attributes\ApiOperation;
+use Glueful\Routing\Attributes\ApiRequestBody;
 use Glueful\Routing\Attributes\ApiResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 
@@ -44,6 +48,7 @@ final class AccountController
         description: 'Sends a verification code to the provided email. Body: `email` (required).',
         tags: ['Authentication'],
     )]
+    #[ApiRequestBody(EmailInputData::class)]
     #[ApiResponse(200, OtpDispatchData::class, description: 'Verification code has been sent to your email')]
     #[ApiResponse(400, description: 'Invalid email address')]
     #[ApiResponse(404, description: 'Email not found')]
@@ -76,6 +81,7 @@ final class AccountController
             . '`purpose` (optional; use password_reset for the reset flow).',
         tags: ['Authentication'],
     )]
+    #[ApiRequestBody(VerifyOtpInputData::class)]
     #[ApiResponse(200, description: 'OTP verified successfully')]
     #[ApiResponse(400, description: 'Invalid OTP')]
     #[ApiResponse(401, description: 'OTP expired')]
@@ -117,6 +123,7 @@ final class AccountController
         description: 'Resends the one-time password (OTP) to the user\'s email. Body: `email` (required).',
         tags: ['Authentication'],
     )]
+    #[ApiRequestBody(EmailInputData::class)]
     #[ApiResponse(200, OtpDispatchData::class, description: 'OTP resent successfully')]
     #[ApiResponse(400, description: 'Invalid email address')]
     #[ApiResponse(404, description: 'Email not found')]
@@ -146,6 +153,7 @@ final class AccountController
         description: 'Initiates the password reset process by sending a reset code. Body: `email` (required).',
         tags: ['Authentication'],
     )]
+    #[ApiRequestBody(EmailInputData::class)]
     #[ApiResponse(200, OtpDispatchData::class, description: 'Password reset instructions sent to email')]
     #[ApiResponse(400, description: 'Invalid email format')]
     #[ApiResponse(404, description: 'Email not found')]
@@ -187,6 +195,7 @@ final class AccountController
             . '`password` (required).',
         tags: ['Authentication'],
     )]
+    #[ApiRequestBody(ResetPasswordInputData::class)]
     #[ApiResponse(200, description: 'Password has been reset successfully')]
     #[ApiResponse(400, description: 'Invalid password format')]
     #[ApiResponse(404, description: 'Email not found')]
