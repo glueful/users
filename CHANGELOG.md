@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.6] - 2026-11-03
+### Fixed
+- `UserProvider` now carries `email_verified_at` in the identity's claims, so the core login's
+  user block (and the response's OIDC `email_verified`) reflects a confirmed address instead of
+  reporting false on every login. Framework 1.91.6 reads the claim; on an older framework the
+  claim is simply unused and nothing changes.
+
 ## [2.5.5] - 2026-10-30
 ### Fixed
 - `verify-email`, `verify-otp`, `resend-otp`, `forgot-password` and `reset-password` documented no

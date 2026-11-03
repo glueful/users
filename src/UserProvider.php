@@ -67,6 +67,9 @@ final class UserProvider implements UserProviderInterface
         }
         return new UserIdentity(
             uuid: (string) $row['uuid'],
+            // The core login copies this into the session user so the response's
+            // `email_verified` is true once the address is confirmed.
+            attributes: ['email_verified_at' => $row['email_verified_at'] ?? null],
             email: isset($row['email']) ? (string) $row['email'] : null,
             username: isset($row['username']) ? (string) $row['username'] : null,
             status: isset($row['status']) ? (string) $row['status'] : null,
