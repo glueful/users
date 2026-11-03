@@ -73,6 +73,21 @@ final class UserProviderTest extends TestCase
         self::assertNull($provider->findByUuid('does-not-exist'));
     }
 
+    public function test_identity_carries_the_verification_stamp(): void
+    {
+        $uuid = $this->seedUser();
+        $provider = new UserProvider(new UserRepository());
+
+        self::assertNull($provider->verifyCredentials('amy@x.test', 'secret-123')?->claim('email_verified_at'));
+
+        $this->app->getContainer()->get('database')->getPDO()
+            ->exec("UPDATE users SET email_verified_at = '2026-11-03 12:15:12' WHERE uuid = '{$uuid}'");
+
+        $identity = $provider->verifyCredentials('amy@x.test', 'secret-123');
+        self::assertSame('2026-11-03 12:15:12', $identity?->claim('email_verified_at'));
+        self::assertSame('2026-11-03 12:15:12', $provider->findByUuid($uuid)?->claim('email_verified_at'));
+    }
+
     public function test_soft_deleted_user_cannot_authenticate(): void
     {
         $this->seedUser();
@@ -125,6 +140,7 @@ final class UserProviderTest extends TestCase
                 email VARCHAR(255),
                 password VARCHAR(255),
                 status VARCHAR(32) DEFAULT "active",
+                email_verified_at TIMESTAMP NULL,
                 created_at TIMESTAMP NULL,
                 deleted_at TIMESTAMP NULL
             )
